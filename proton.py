@@ -228,7 +228,7 @@ class Exporter:
     else:
       valuelist = value.strip('[]').split(',')
       for v in valuelist:
-        self.buildexpress(list_, basetype, name, v)
+        self.buildexpress(list_, basetype, name, v, False, True)
        
     fillvalue(parent, name + 's', list_, isschema)
       
@@ -246,11 +246,11 @@ class Exporter:
       for i in range(0, len(fieldnamestypes)):
         if i < len(fieldValues):
           fieldtype, fieldname = splitspace(fieldnamestypes[i])
-          self.buildexpress(obj, fieldtype, fieldname, fieldValues[i])
+          self.buildexpress(obj, fieldtype, fieldname, fieldValues[i], False, True)
 
     fillvalue(parent, name, obj, isschema)       
       
-  def buildbasexpress(self, parent, type_, name, value, isschema):
+  def buildbasexpress(self, parent, type_, name, value, isschema, inobj):
     typename = self.gettype(type_) 
     if isschema:
       value = getscemainfo(typename, value)
@@ -270,6 +270,8 @@ class Exporter:
             value = self.stringescape(str(value))
         else:            
           value = self.stringescape(str(value))
+        if inobj and len(value) > 0 and value[0] == '\n':
+          value = value[1:]
       elif typename == 'bool':
         try:
           value = int(float(value))
@@ -285,14 +287,14 @@ class Exporter:
             
     fillvalue(parent, name, value, isschema)
 
-  def buildexpress(self, parent, type_, name, value, isschema = False):
+  def buildexpress(self, parent, type_, name, value, isschema = False, inobj = False):
     typename = self.gettype(type_)
     if typename == 'list':
       self.buildlistexpress(parent, type_, name, value, isschema)
     elif typename == 'obj':
       self.buildobjexpress(parent, type_, name, value, isschema)
     else:
-      self.buildbasexpress(parent, type_, name, value, isschema)
+      self.buildbasexpress(parent, type_, name, value, isschema, inobj)
       
   def getrootname(self, exportmark, isitem):
     return exportmark + 's' + (self.context.extension or '') if isitem else exportmark + (self.context.extension or '')
