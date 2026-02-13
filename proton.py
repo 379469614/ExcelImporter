@@ -32,6 +32,7 @@ import multiprocessing
 import xml.etree.ElementTree as ElementTree
 import xml.dom.minidom as minidom
 import sxl
+import nested_parser
 
 def fillvalue(parent, name, value, isschema):
   if isinstance(parent, list):
@@ -69,44 +70,46 @@ def gerexportfilename(root, format_, folder):
   return os.path.join(folder, filename)
 
 def splitspace(s):
-  return re.split(r'[' + string.whitespace + ']+', s.strip())
+  return nested_parser.split_field_declaration(s)
   
-def buildbasexml(parent, name, value):
+def buildbasexml(parent, name, value, noplural = False):
   value = str(value)
-  if parent.tag == name + 's':
+  listtag = name if noplural else name + 's'
+  if parent.tag == listtag:
     element = ElementTree.Element(name)
     element.text = value
     parent.append(element)
   else:
     parent.set(name, value)
             
-def buildlistxml(parent, name, list_):
+def buildlistxml(parent, name, list_, noplural = False):
   element = ElementTree.Element(name)
   parent.append(element)
+  itemname = name if noplural else name[:-1]
   for v in list_:
-    buildxml(element, name[:-1], v)    
+    buildxml(element, itemname, v, noplural)    
 
-def buildobjxml(parent, name, obj):
+def buildobjxml(parent, name, obj, noplural = False):
   element = ElementTree.Element(name)
   parent.append(element)
   
   for k, v in obj.items():
-    buildxml(element, k, v)
+    buildxml(element, k, v, noplural)
         
-def buildxml(parent, name, value):
+def buildxml(parent, name, value, noplural = False):
   if isinstance(value, int) or isinstance(value, float) or isinstance(value, str):
-    buildbasexml(parent, name, value)
+    buildbasexml(parent, name, value, noplural)
       
   elif isinstance(value, list):
-    buildlistxml(parent, name, value)
+    buildlistxml(parent, name, value, noplural)
       
   elif isinstance(value, dict):
-    buildobjxml(parent, name, value)
+    buildobjxml(parent, name, value, noplural)
             
-def savexml(record):
+def savexml(record, noplural = False):
   book = ElementTree.ElementTree()
   book.append = lambda e: book._setroot(e)
-  buildxml(book, record.root, record.obj)
+  buildxml(book, record.root, record.obj, noplural)
   
   xmlstr = ElementTree.tostring(book.getroot(), 'utf-8')
   dom = minidom.parseString(xmlstr)
@@ -201,6 +204,9 @@ class Exporter:
   
   def stringescape(self, s):
     return s.replace('\0', ',').replace('\a', self.context.objseparator)
+
+  def pluralname(self, name):
+    return name if self.context.noplural else name + 's'
   
   def gettype(self, type_):
     if type_[-2] == '[' and  type_[-1] == ']':
@@ -226,15 +232,15 @@ class Exporter:
       self.buildexpress(list_, basetype, name, None, isschema)
       list_ = getscemainfo(list_[0], value)
     else:
-      valuelist = value.strip('[]').split(',')
+      valuelist = nested_parser.split_list_values(value)
       for v in valuelist:
         self.buildexpress(list_, basetype, name, v, False, True)
        
-    fillvalue(parent, name + 's', list_, isschema)
+    fillvalue(parent, self.pluralname(name), list_, isschema)
       
   def buildobjexpress(self, parent, type_, name, value, isschema):
     obj = collections.OrderedDict()
-    fieldnamestypes = type_.strip('{}').split(self.context.objseparator)
+    fieldnamestypes = nested_parser.split_obj_type_fields(type_, self.context.objseparator)
     
     if isschema:
       for i in range(0, len(fieldnamestypes)):
@@ -242,7 +248,7 @@ class Exporter:
         self.buildexpress(obj, fieldtype, fieldname, None, isschema)
       obj = getscemainfo(obj, value)
     else:
-      fieldValues = value.strip('{}').split(self.context.objseparator)
+      fieldValues = nested_parser.split_obj_values(value, self.context.objseparator)
       for i in range(0, len(fieldnamestypes)):
         if i < len(fieldValues):
           fieldtype, fieldname = splitspace(fieldnamestypes[i])
@@ -297,7 +303,8 @@ class Exporter:
       self.buildbasexpress(parent, type_, name, value, isschema, inobj)
       
   def getrootname(self, exportmark, isitem):
-    return exportmark + 's' + (self.context.extension or '') if isitem else exportmark + (self.context.extension or '')
+    root = self.pluralname(exportmark) if isitem else exportmark
+    return root + (self.context.extension or '')
 
   def export(self, path):
     self.path = path
@@ -333,12 +340,13 @@ class Exporter:
                 cout = exportobj
               else:
                 cout = (collections.OrderedDict(), collections.OrderedDict())
-                cout[0][item + 's'] = [[exportobj[0]]]
+                itemkey = self.pluralname(item)
+                cout[0][itemkey] = [[exportobj[0]]]
                 item = None
                 exportobj = cout
                 obj = exportobj[1]
                 if obj:
-                  cout[1][item + 's'] = obj
+                  cout[1][itemkey] = obj
                   
             self.records.append(Record(self.path, sheet, exportfile, root, item, exportobj, exportmark))
           else:
@@ -347,10 +355,10 @@ class Exporter:
         else:
           if item:
             exportobj = self.exportitemsheet(sheet)
-            cout[0][item + 's'] = [[exportobj[0]]]
+            cout[0][self.pluralname(item)] = [[exportobj[0]]]
             obj = exportobj[1]
             if obj:
-              cout[1][item + 's'] = obj
+              cout[1][self.pluralname(item)] = obj
           else:
             exportobj = self.exportconfigsheet(sheet, configtitleinfo)
             cout[0].update(exportobj[0])   
@@ -526,8 +534,8 @@ class Exporter:
         
     elif self.context.format == 'xml':
       if record.item:
-        record.obj = { record.item + 's' : record.obj }
-      savexml(record) 
+        record.obj = { self.pluralname(record.item) : record.obj }
+      savexml(record, self.context.noplural) 
         
     elif self.context.format == 'lua':
       luastr = "".join(tolua(record.obj))
@@ -625,13 +633,14 @@ class Context:
   -m      : use the count of multiprocesses to export, default is cpu count
   -c      : a file path, save the excel structure to json
             the external program uses this file to automatically generate the read code
+  -x      : disable auto plural naming (do not append 's')
   -h      : print this help message and exit
 
   https://github.com/yanghuan/proton'''
 
 if __name__ == '__main__':
   print('argv:' , sys.argv)
-  opst, args = getopt.getopt(sys.argv[1:], 'p:f:e:s:t:r:m:c:h')
+  opst, args = getopt.getopt(sys.argv[1:], 'p:f:e:s:t:r:m:c:xh')
 
   context = Context()
   context.path = None
@@ -642,6 +651,7 @@ if __name__ == '__main__':
   context.objseparator = ';'
   context.codegenerator = None
   context.multiprocessescount = None
+  context.noplural = False
 
   for op, v in opst:
     if op == '-p':
@@ -660,6 +670,8 @@ if __name__ == '__main__':
       context.multiprocessescount = int(v) if v is not None else None
     elif op == '-c':
       context.codegenerator = v    
+    elif op == '-x':
+      context.noplural = True
     elif op == '-h':
       print(Context.__doc__)
       sys.exit()
