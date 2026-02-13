@@ -30,6 +30,7 @@ Options
 -c      : a file path, save the excel structure to json, 
           the external program uses this file to automatically generate the read code      
 -h      : print this help message and exit
+-x      : don't append 's' on names
 ```
 
 ## Documentation
@@ -71,6 +72,7 @@ Options
 -c      : a file path, save the excel structure to json, 
           the external program uses this file to automatically generate the read code      
 -h      : print this help message and exit
+-x      : don't append 's' on names
 ```
 
 ## 文档
