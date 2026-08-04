@@ -8,13 +8,39 @@
 - 保留 --命令行 自检模式，供自动化验证
 
 注意：因 PyQt6 对非 ASCII 方法名的信号连接存在段错误 bug
-（clicked.connect(self.中文方法) 会崩溃），类方法统一使用英文命名。
+（clicked.connect(self.中文方法) 会崩溃），信号槽方法与线程方法统一使用英文命名，
+其余变量、属性、核心逻辑一律中文。
 """
-import json
 import multiprocessing
 import os
 import sys
 import traceback
+
+import sxl
+import 导表工具集
+from 导表核心 import 导出器
+from 导表入口 import 导出上下文, 导出单个文件
+
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QMessageBox,
+    QProgressBar,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QPlainTextEdit,
+    QAbstractItemView,
+)
+
 
 常量_自检参数 = "--命令行"
 
@@ -25,53 +51,16 @@ if 是打包程序:
 else:
     程序目录 = os.path.dirname(os.path.abspath(__file__))
 
-# 路径基准：无论开发态（脚本）还是打包态（exe），统一为程序文件
-# 所在目录的上一层目录。界面中的来源/导出目录均以相对它的路径填写（如 sample、output）。
+# 路径基准：保留兼容相对路径解析（固定路径为绝对路径，实际不会触发相对分支）
 路径基准目录 = os.path.dirname(程序目录)
 
-
-def 获取配置路径() -> str:
-    """返回配置文件路径（用户配置目录，避免打包后程序目录只读无法写入）"""
-    if sys.platform == "win32":
-        根目录 = os.environ.get("APPDATA") or 程序目录
-    elif sys.platform == "darwin":
-        根目录 = os.path.expanduser("~/Library/Application Support")
-    else:
-        根目录 = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    return os.path.join(根目录, "导表工具", "config.json")
+# 固定配置路径：来源目录与导出目录写死为绝对路径，不可改变。
+固定来源路径 = "/home/ubuntu/GodotProjects/弹弹弹球/5配置文件"
+固定导出路径 = "/home/ubuntu/GodotProjects/弹弹弹球/BouncyPinball/数据配置"
 
 
-def 读取配置() -> dict:
-    """读取上次保存的目录配置，文件不存在或损坏时返回空 dict"""
-    try:
-        with open(获取配置路径(), "r", encoding="utf-8") as 文件:
-            return json.load(文件)
-    except (OSError, ValueError):
-        return {}
-
-
-def 保存配置(来源目录: str, 导出目录: str) -> None:
-    """将界面填写的目录存为绝对路径，供下次启动原样回填。
-
-    注：存绝对路径而非相对路径，避免打包后的 exe 被复制到其他目录后
-    「路径基准目录」变化导致相对路径读回错位（表现为记不住路径）。
-    """
-    try:
-        os.makedirs(os.path.dirname(获取配置路径()), exist_ok=True)
-        with open(获取配置路径(), "w", encoding="utf-8") as 文件:
-            json.dump(
-                {"来源目录": 解析路径(来源目录), "导出目录": 解析路径(导出目录)},
-                文件, ensure_ascii=False, indent=2,
-            )
-    except OSError:
-        pass  # 配置保存失败不影响工具使用
-
-
+# 将界面填写的路径解析为绝对路径：绝对路径原样返回，相对路径以脚本所在目录的上一级目录为基准拼接。
 def 解析路径(输入: str) -> str:
-    """将界面填写的路径解析为绝对路径。
-
-    绝对路径原样返回；相对路径以「脚本所在目录的上一级目录」为基准拼接。
-    """
     输入 = (输入 or "").strip()
     if not 输入:
         return 输入
@@ -80,22 +69,8 @@ def 解析路径(输入: str) -> str:
     return os.path.normpath(os.path.join(路径基准目录, 输入))
 
 
-def 转相对路径(绝对路径: str) -> str:
-    """将绝对路径转为相对「脚本所在目录上一级目录」的路径，供界面回填显示。
-
-    若目标不在基准目录之下（如跨盘符），则原样返回绝对路径。
-    """
-    try:
-        相对 = os.path.relpath(绝对路径, 路径基准目录)
-    except ValueError:  # Windows 跨盘符
-        return 绝对路径
-    if 相对.startswith(".."):
-        return 绝对路径
-    return 相对
-
-
+# 将项目自带的 sxl 依赖目录加入搜索路径，供系统未安装 sxl 时使用。
 def 引导自带依赖() -> None:
-    """若系统未安装 sxl，则将项目自带的依赖目录加入搜索路径"""
     脚本目录 = os.path.dirname(os.path.abspath(__file__))
     自带依赖目录 = os.path.join(脚本目录, "sample", "tools", "py37")
     if os.path.isdir(自带依赖目录):
@@ -104,65 +79,51 @@ def 引导自带依赖() -> None:
 
 引导自带依赖()
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QFont
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QFileDialog, QMessageBox,
-    QProgressBar, QTableWidget, QTableWidgetItem, QHeaderView,
-    QPlainTextEdit, QAbstractItemView,
-)
-
-import proton as 导表核心_库
-
 
 # ---------------------------------------------------------------- 核心逻辑
 
+# 预扫各 xlsx 的 sheet 导出标记，检测不同文件含同名标记导致生成同名 json 相互覆盖的问题。
 def 扫描根节点冲突(xlsx路径列表: list) -> dict:
-    """预扫各 xlsx 的 sheet 导出标记，检测不同文件含同名标记（会生成同名 json 相互覆盖）"""
     标记到来源 = {}
+    上下文 = 导出上下文()
     for 路径 in xlsx路径列表:
         try:
-            工作簿 = 导表核心_库.sxl.Workbook(路径)
+            工作簿 = sxl.Workbook(路径)
         except Exception:
             continue
         for 名称 in 工作簿.sheets:
             if isinstance(名称, str):
-                标记 = 导表核心_库.getexportmark(名称)
+                标记 = 导表工具集.获取导出标记(名称)
                 if 标记:
                     表 = 工作簿.sheets[名称]
-                    导出实例 = 导表核心_库.Exporter(导表核心_库.Context())
-                    是配置表 = 导出实例.getconfigsheetfinfo(表) is not None
+                    导出实例 = 导出器(上下文)
+                    是配置表 = 导出实例.获取配置表标题信息(表) is not None
                     # 数据表输出复数文件名（标记 Hero → Heros.json），配置表保持原名
                     文件名 = 标记 if 是配置表 else 标记 + "s"
                     标记到来源.setdefault(文件名 + ".json", []).append(路径)
     return {文件名: 来源 for 文件名, 来源 in 标记到来源.items() if len(来源) > 1}
 
 
-def 构建导出上下文(xlsx路径: str, 导出目录: str) -> 导表核心_库.Context:
-    """按 proton 命令行默认参数构建单个文件的导出上下文"""
-    上下文 = 导表核心_库.Context()
-    上下文.path = xlsx路径
-    上下文.folder = 导出目录
-    上下文.format = "json"
-    上下文.sign = None
-    上下文.extension = None
-    上下文.objseparator = ";"
-    上下文.codegenerator = None
-    上下文.multiprocessescount = None
-    上下文.noplural = False
+# 按导表入口默认参数构建单个文件的导出上下文。
+def 构建导出上下文(xlsx路径: str, 导出目录: str) -> 导出上下文:
+    上下文 = 导出上下文()
+    上下文.路径 = xlsx路径
+    上下文.文件夹 = 导出目录
+    上下文.格式 = "json"
+    上下文.签名 = None
+    上下文.扩展名 = None
+    上下文.对象分隔符 = ";"
+    上下文.代码生成器 = None
+    上下文.多进程数量 = None
+    上下文.禁用复数 = False
     return 上下文
 
 
+# 扫描来源目录顶层所有 xlsx，逐个导出 json，返回处理结果汇总。
 def 导出全部(来源目录: str, 导出目录: str, 进度回调, 明细回调=None) -> dict:
-    """扫描来源目录顶层所有 xlsx，逐个导出 json，返回处理结果汇总
-
-    进度回调(索引, 总数, 文件名)
-    明细回调(文件名, json文件名, 错误详情或 None) —— 每个文件导出完成后触发
-    """
     os.makedirs(导出目录, exist_ok=True)
     xlsx列表 = sorted(
-        f for f in os.listdir(来源目录) if f.lower().endswith(".xlsx")
+        文件名 for 文件名 in os.listdir(来源目录) if 文件名.lower().endswith(".xlsx")
     )
     xlsx路径列表 = [os.path.join(来源目录, 文件名) for 文件名 in xlsx列表]
     冲突 = 扫描根节点冲突(xlsx路径列表)
@@ -173,7 +134,7 @@ def 导出全部(来源目录: str, 导出目录: str, 进度回调, 明细回�
         文件名 = os.path.basename(xlsx路径)
         进度回调(索引, 总数, 文件名)
         try:
-            导出结果 = 导表核心_库.export(构建导出上下文(xlsx路径, 导出目录), xlsx路径)
+            导出结果 = 导出单个文件(构建导出上下文(xlsx路径, 导出目录), xlsx路径)
             if isinstance(导出结果, str):
                 错误列表.append((文件名, 导出结果))
                 if 明细回调:
@@ -221,7 +182,7 @@ class ExportThread(QThread):
                 self.progress_signal.emit,
                 self.detail_signal.emit,
             )
-        except Exception as 异常:
+        except Exception:
             结果 = {
                 "成功": 0,
                 "失败": 1,
@@ -390,11 +351,6 @@ class 导表窗口(QMainWindow):
         self.setMinimumSize(640, 560)
         self._线程 = None
         self._构建界面()
-        配置 = 读取配置()
-        if 配置.get("来源目录"):
-            self.来源输入.setText(配置["来源目录"])
-        if 配置.get("导出目录"):
-            self.导出输入.setText(配置["导出目录"])
         self.refresh_file_list()
 
     def _构建界面(self) -> None:
@@ -413,26 +369,22 @@ class 导表窗口(QMainWindow):
         主布局.addWidget(副标题)
         主布局.addSpacing(6)
 
-        # 来源目录
+        # 来源目录（固定路径，不可编辑）
         来源行 = QHBoxLayout()
         来源行.addWidget(QLabel("来源目录:"))
         self.来源输入 = QLineEdit()
-        self.来源输入.setPlaceholderText("相对脚本上一级目录的路径，如 sample")
+        self.来源输入.setText(固定来源路径)
+        self.来源输入.setReadOnly(True)
         来源行.addWidget(self.来源输入, 1)
-        来源按钮 = QPushButton("浏览...")
-        来源按钮.clicked.connect(self.choose_source_dir)
-        来源行.addWidget(来源按钮)
         主布局.addLayout(来源行)
 
-        # 导出目录
+        # 导出目录（固定路径，不可编辑）
         导出行 = QHBoxLayout()
         导出行.addWidget(QLabel("导出目录:"))
         self.导出输入 = QLineEdit()
-        self.导出输入.setPlaceholderText("相对脚本上一级目录的路径，如 output")
+        self.导出输入.setText(固定导出路径)
+        self.导出输入.setReadOnly(True)
         导出行.addWidget(self.导出输入, 1)
-        导出按钮 = QPushButton("浏览...")
-        导出按钮.clicked.connect(self.choose_export_dir)
-        导出行.addWidget(导出按钮)
         主布局.addLayout(导出行)
 
         # 文件列表
@@ -484,34 +436,12 @@ class 导表窗口(QMainWindow):
 
     # ------------------------------------------------------------ 交互
 
-    def choose_source_dir(self) -> None:
-        起始 = 解析路径(self.来源输入.text()) or 路径基准目录
-        目录 = QFileDialog.getExistingDirectory(self, "选择来源目录", 起始)
-        if 目录:
-            self.来源输入.setText(转相对路径(目录))
-            self.保存目录配置()
-            self.refresh_file_list()
-
-    def choose_export_dir(self) -> None:
-        起始 = 解析路径(self.导出输入.text()) or 路径基准目录
-        目录 = QFileDialog.getExistingDirectory(self, "选择导出目录", 起始)
-        if 目录:
-            self.导出输入.setText(转相对路径(目录))
-            self.保存目录配置()
-
-    def 保存目录配置(self) -> None:
-        """将当前输入框内容保存为配置（存相对路径，下次启动自动回填）"""
-        来源目录 = (self.来源输入.text() or "").strip()
-        导出目录 = (self.导出输入.text() or "").strip()
-        if 来源目录 or 导出目录:
-            保存配置(来源目录, 导出目录)
-
     def refresh_file_list(self) -> None:
         """来源目录变化后，列出其中所有 xlsx 并预扫冲突"""
         来源目录 = 解析路径(self.来源输入.text())
         if not os.path.isdir(来源目录):
             return
-        xlsx列表 = sorted(f for f in os.listdir(来源目录) if f.lower().endswith(".xlsx"))
+        xlsx列表 = sorted(文件名 for 文件名 in os.listdir(来源目录) if 文件名.lower().endswith(".xlsx"))
         self.文件表.setRowCount(len(xlsx列表))
         for 行, 文件名 in enumerate(xlsx列表):
             self.文件表.setItem(行, 0, QTableWidgetItem(文件名))
@@ -520,7 +450,7 @@ class 导表窗口(QMainWindow):
         self.文件计数标签.setText(f"共 {len(xlsx列表)} 个文件")
 
         # 预扫冲突并提示
-        路径列表 = [os.path.join(来源目录, f) for f in xlsx列表]
+        路径列表 = [os.path.join(来源目录, 文件名) for 文件名 in xlsx列表]
         冲突 = 扫描根节点冲突(路径列表)
         if 冲突:
             说明 = self.format_conflict(冲突)
@@ -548,7 +478,6 @@ class 导表窗口(QMainWindow):
         if not 目录组:
             return
         来源目录, 导出目录 = 目录组
-        self.保存目录配置()
 
         # 重置界面状态
         self.按钮开始.setEnabled(False)
@@ -632,14 +561,9 @@ class 导表窗口(QMainWindow):
 
 # ---------------------------------------------------------------- 命令行模式
 
-def 命令行导出(来源目录: str, 导出目录: str) -> int:
-    """无窗口自检模式：打印进度与结果，供自动化验证
-
-    支持与界面一致：路径可填相对「脚本所在目录上一级目录」的相对路径。
-    """
-    来源目录 = 解析路径(来源目录)
-    导出目录 = 解析路径(导出目录)
-    结果 = 导出全部(来源目录, 导出目录, lambda 索引, 总数, 文件名: print(f"[{索引}/{总数}] {文件名}"))
+# 无窗口自检模式：打印进度与结果，供自动化验证，来源与导出目录写死为固定绝对路径。
+def 命令行导出() -> int:
+    结果 = 导出全部(固定来源路径, 固定导出路径, lambda 索引, 总数, 文件名: print(f"[{索引}/{总数}] {文件名}"))
     print(f"完成：成功 {结果['成功']} 个，失败 {结果['失败']} 个")
     if 结果["冲突"]:
         print("警告：以下 json 文件由多个 excel 生成，后导出的会覆盖先前的：")
@@ -655,11 +579,7 @@ def 命令行导出(来源目录: str, 导出目录: str) -> int:
 def 主函数() -> None:
     multiprocessing.freeze_support()  # PyInstaller 打包后 multiprocessing 需要
     if 常量_自检参数 in sys.argv:
-        位置参数 = [参数 for 参数 in sys.argv[1:] if 参数 != 常量_自检参数]
-        if len(位置参数) != 2:
-            print(f"用法：python3 {__file__} {常量_自检参数} <来源目录> <导出目录>")
-            sys.exit(2)
-        sys.exit(命令行导出(位置参数[0], 位置参数[1]))
+        sys.exit(命令行导出())
 
     # 高分屏适配
     QApplication.setHighDpiScaleFactorRoundingPolicy(
@@ -669,7 +589,7 @@ def 主函数() -> None:
     应用.setStyleSheet(深色样式表)
     # 中文字体优先
     字体 = QFont()
-    字体.setFamilies(["Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", "WenQuanYi Micro Hei", "sans-serif"])
+    字体.setFamilies(["Microsoft YaHei UI", "PingFang SC", "Noto Sans Mono CJK SC", "WenQuanYi Micro Hei", "sans-serif"])
     应用.setFont(字体)
     窗口 = 导表窗口()
     窗口.show()
