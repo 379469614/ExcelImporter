@@ -10,6 +10,7 @@
 注意：因 PyQt6 对非 ASCII 方法名的信号连接存在段错误 bug
 （clicked.connect(self.中文方法) 会崩溃），类方法统一使用英文命名。
 """
+import json
 import multiprocessing
 import os
 import sys
@@ -24,10 +25,42 @@ if 是打包程序:
 else:
     程序目录 = os.path.dirname(os.path.abspath(__file__))
 
-# 路径基准：开发态为脚本所在目录的上一级目录（保持历史行为）；
-# 打包后没有脚本目录，以可执行文件所在目录为基准（sample、output 就放在 exe 旁边）。
-# 来源目录/导出目录在界面中均以相对该目录的路径填写（如 sample、output）。
-路径基准目录 = 程序目录 if 是打包程序 else os.path.dirname(程序目录)
+# 路径基准：无论开发态（脚本）还是打包态（exe），统一为程序文件
+# 所在目录的上一层目录。界面中的来源/导出目录均以相对它的路径填写（如 sample、output）。
+路径基准目录 = os.path.dirname(程序目录)
+
+
+def 获取配置路径() -> str:
+    """返回配置文件路径（用户配置目录，避免打包后程序目录只读无法写入）"""
+    if sys.platform == "win32":
+        根目录 = os.environ.get("APPDATA") or 程序目录
+    elif sys.platform == "darwin":
+        根目录 = os.path.expanduser("~/Library/Application Support")
+    else:
+        根目录 = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(根目录, "导表工具", "config.json")
+
+
+def 读取配置() -> dict:
+    """读取上次保存的目录配置，文件不存在或损坏时返回空 dict"""
+    try:
+        with open(获取配置路径(), "r", encoding="utf-8") as 文件:
+            return json.load(文件)
+    except (OSError, ValueError):
+        return {}
+
+
+def 保存配置(来源目录: str, 导出目录: str) -> None:
+    """将界面填写的目录存为相对路径，供下次启动回填"""
+    try:
+        os.makedirs(os.path.dirname(获取配置路径()), exist_ok=True)
+        with open(获取配置路径(), "w", encoding="utf-8") as 文件:
+            json.dump(
+                {"来源目录": 转相对路径(来源目录), "导出目录": 转相对路径(导出目录)},
+                文件, ensure_ascii=False, indent=2,
+            )
+    except OSError:
+        pass  # 配置保存失败不影响工具使用
 
 
 def 解析路径(输入: str) -> str:
@@ -353,6 +386,12 @@ class 导表窗口(QMainWindow):
         self.setMinimumSize(640, 560)
         self._线程 = None
         self._构建界面()
+        配置 = 读取配置()
+        if 配置.get("来源目录"):
+            self.来源输入.setText(配置["来源目录"])
+        if 配置.get("导出目录"):
+            self.导出输入.setText(配置["导出目录"])
+        self.refresh_file_list()
 
     def _构建界面(self) -> None:
         根控件 = QWidget()
@@ -446,6 +485,7 @@ class 导表窗口(QMainWindow):
         目录 = QFileDialog.getExistingDirectory(self, "选择来源目录", 起始)
         if 目录:
             self.来源输入.setText(转相对路径(目录))
+            self.保存目录配置()
             self.refresh_file_list()
 
     def choose_export_dir(self) -> None:
@@ -453,6 +493,14 @@ class 导表窗口(QMainWindow):
         目录 = QFileDialog.getExistingDirectory(self, "选择导出目录", 起始)
         if 目录:
             self.导出输入.setText(转相对路径(目录))
+            self.保存目录配置()
+
+    def 保存目录配置(self) -> None:
+        """将当前输入框内容保存为配置（存相对路径，下次启动自动回填）"""
+        来源目录 = (self.来源输入.text() or "").strip()
+        导出目录 = (self.导出输入.text() or "").strip()
+        if 来源目录 or 导出目录:
+            保存配置(来源目录, 导出目录)
 
     def refresh_file_list(self) -> None:
         """来源目录变化后，列出其中所有 xlsx 并预扫冲突"""
@@ -496,6 +544,7 @@ class 导表窗口(QMainWindow):
         if not 目录组:
             return
         来源目录, 导出目录 = 目录组
+        self.保存目录配置()
 
         # 重置界面状态
         self.按钮开始.setEnabled(False)
