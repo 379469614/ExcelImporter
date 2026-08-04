@@ -49,9 +49,9 @@ def 获取模式信息(类型, 描述: str | None) -> list:
     return [类型, 描述] if 描述 else [类型]
 
 
-# 从工作表名称中识别导出标记，无匹配标记时返回 False。
+# 从以"|"开头的工作表名称中识别导出标记，无匹配标记时返回 False。
 def 获取导出标记(工作表名称: str) -> str | bool:
-    匹配 = re.search(r"\|[" + string.whitespace + r"]*(\w+)", 工作表名称)
+    匹配 = re.match(r"\|[" + string.whitespace + r"]*(\w+)", 工作表名称)
     return 匹配.group(1) if 匹配 else False
 
 
@@ -60,11 +60,6 @@ def 是否为签名匹配(签名参数: str | None, 签名: str) -> bool:
     if 签名参数 is None:
         return True
     return True if [子项 for 子项 in re.split(r"[/\\, :]", 签名) if 子项 in 签名参数] else False
-
-
-# 判断源文件是否比目标文件新，目标文件不存在时同样视为需要重新导出。
-def 是否过期(源文件: str, 目标文件: str) -> bool:
-    return not os.path.isfile(目标文件) or os.path.getmtime(源文件) > os.path.getmtime(目标文件)
 
 
 # 组合根名称与格式生成导出文件名，并拼接到导出文件夹下。
