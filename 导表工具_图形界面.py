@@ -1,0 +1,579 @@
+"""导表工具图形界面（PyQt6 版）
+
+选择来源目录与导出目录，批量将 xlsx 导出为 json。
+- 深色现代主题（QSS 样式）
+- 导出前预扫描同名表标记冲突（不同 xlsx 生成同名 json 相互覆盖）
+- 后台线程导出，界面不卡顿
+- 文件列表实时显示每个文件的导出状态
+- 保留 --命令行 自检模式，供自动化验证
+
+注意：因 PyQt6 对非 ASCII 方法名的信号连接存在段错误 bug
+（clicked.connect(self.中文方法) 会崩溃），类方法统一使用英文命名。
+"""
+import os
+import sys
+import traceback
+
+常量_自检参数 = "--命令行"
+
+
+def 引导自带依赖() -> None:
+    """若系统未安装 sxl，则将项目自带的依赖目录加入搜索路径"""
+    脚本目录 = os.path.dirname(os.path.abspath(__file__))
+    自带依赖目录 = os.path.join(脚本目录, "sample", "tools", "py37")
+    if os.path.isdir(自带依赖目录):
+        sys.path.insert(0, 自带依赖目录)
+
+
+引导自带依赖()
+
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QFileDialog, QMessageBox,
+    QProgressBar, QTableWidget, QTableWidgetItem, QHeaderView,
+    QPlainTextEdit, QAbstractItemView,
+)
+
+import proton as 导表核心_库
+
+
+# ---------------------------------------------------------------- 核心逻辑
+
+def 扫描根节点冲突(xlsx路径列表: list) -> dict:
+    """预扫各 xlsx 的 sheet 导出标记，检测不同文件含同名标记（会生成同名 json 相互覆盖）"""
+    标记到来源 = {}
+    for 路径 in xlsx路径列表:
+        try:
+            工作簿 = 导表核心_库.sxl.Workbook(路径)
+        except Exception:
+            continue
+        for 名称 in 工作簿.sheets:
+            if isinstance(名称, str):
+                标记 = 导表核心_库.getexportmark(名称)
+                if 标记:
+                    表 = 工作簿.sheets[名称]
+                    导出实例 = 导表核心_库.Exporter(导表核心_库.Context())
+                    是配置表 = 导出实例.getconfigsheetfinfo(表) is not None
+                    # 数据表输出复数文件名（标记 Hero → Heros.json），配置表保持原名
+                    文件名 = 标记 if 是配置表 else 标记 + "s"
+                    标记到来源.setdefault(文件名 + ".json", []).append(路径)
+    return {文件名: 来源 for 文件名, 来源 in 标记到来源.items() if len(来源) > 1}
+
+
+def 构建导出上下文(xlsx路径: str, 导出目录: str) -> 导表核心_库.Context:
+    """按 proton 命令行默认参数构建单个文件的导出上下文"""
+    上下文 = 导表核心_库.Context()
+    上下文.path = xlsx路径
+    上下文.folder = 导出目录
+    上下文.format = "json"
+    上下文.sign = None
+    上下文.extension = None
+    上下文.objseparator = ";"
+    上下文.codegenerator = None
+    上下文.multiprocessescount = None
+    上下文.noplural = False
+    return 上下文
+
+
+def 导出全部(来源目录: str, 导出目录: str, 进度回调, 明细回调=None) -> dict:
+    """扫描来源目录顶层所有 xlsx，逐个导出 json，返回处理结果汇总
+
+    进度回调(索引, 总数, 文件名)
+    明细回调(文件名, json文件名, 错误详情或 None) —— 每个文件导出完成后触发
+    """
+    os.makedirs(导出目录, exist_ok=True)
+    xlsx列表 = sorted(
+        f for f in os.listdir(来源目录) if f.lower().endswith(".xlsx")
+    )
+    xlsx路径列表 = [os.path.join(来源目录, 文件名) for 文件名 in xlsx列表]
+    冲突 = 扫描根节点冲突(xlsx路径列表)
+    导出结果列表 = []
+    错误列表 = []
+    总数 = len(xlsx路径列表)
+    for 索引, xlsx路径 in enumerate(xlsx路径列表, start=1):
+        文件名 = os.path.basename(xlsx路径)
+        进度回调(索引, 总数, 文件名)
+        try:
+            导出结果 = 导表核心_库.export(构建导出上下文(xlsx路径, 导出目录), xlsx路径)
+            if isinstance(导出结果, str):
+                错误列表.append((文件名, 导出结果))
+                if 明细回调:
+                    明细回调(文件名, None, 导出结果)
+            else:
+                导出结果列表.append(导出结果)
+                json名 = ", ".join(schema["exportfile"] for schema in 导出结果)
+                if 明细回调:
+                    明细回调(文件名, json名, None)
+        except Exception as 异常:  # 单个文件失败不中断整体流程
+            错误列表.append((文件名, repr(异常)))
+            if 明细回调:
+                明细回调(文件名, None, repr(异常))
+    return {
+        "成功": len(导出结果列表),
+        "失败": len(错误列表),
+        "错误列表": 错误列表,
+        "冲突": 冲突,
+    }
+
+
+# ---------------------------------------------------------------- 导出线程
+
+class ExportThread(QThread):
+    """后台导出线程：通过信号向界面汇报进度，避免阻塞 UI
+
+    注：类名与信号名必须为 ASCII —— PyQt6 6.11 对非 ASCII 类名/信号名
+    （如中文）的 pyqtSignal 子类存在 UnicodeEncodeError 崩溃 bug。
+    """
+
+    progress_signal = pyqtSignal(int, int, str)
+    detail_signal = pyqtSignal(str, str, object)
+    finished_signal = pyqtSignal(dict)
+
+    def __init__(self, 来源目录: str, 导出目录: str, 父对象=None):
+        super().__init__(父对象)
+        self.来源目录 = 来源目录
+        self.导出目录 = 导出目录
+
+    def run(self) -> None:
+        try:
+            结果 = 导出全部(
+                self.来源目录,
+                self.导出目录,
+                self.progress_signal.emit,
+                self.detail_signal.emit,
+            )
+        except Exception as 异常:
+            结果 = {
+                "成功": 0,
+                "失败": 1,
+                "错误列表": [("整体流程", traceback.format_exc())],
+                "冲突": {},
+            }
+        self.finished_signal.emit(结果)
+
+
+# ---------------------------------------------------------------- 界面样式
+
+深色样式表 = """
+QMainWindow, QDialog {
+    background-color: #14161c;
+}
+QLabel {
+    color: #e8eaf0;
+    font-size: 13px;
+}
+QLabel#标题 {
+    font-size: 20px;
+    font-weight: bold;
+    color: #ffffff;
+}
+QLabel#副标题 {
+    color: #8b93a7;
+    font-size: 12px;
+}
+QLabel#状态标签 {
+    color: #a8b3c5;
+}
+QLineEdit {
+    background-color: #1f232c;
+    border: 1px solid #2e3440;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #e8eaf0;
+    selection-background-color: #4f8cff;
+    font-size: 13px;
+}
+QLineEdit:focus {
+    border: 1px solid #4f8cff;
+}
+QPushButton {
+    background-color: #2b303b;
+    color: #e8eaf0;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 18px;
+    font-size: 13px;
+}
+QPushButton:hover {
+    background-color: #3a4150;
+}
+QPushButton:pressed {
+    background-color: #232832;
+}
+QPushButton#主按钮 {
+    background-color: #4f8cff;
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: bold;
+    padding: 12px 24px;
+}
+QPushButton#主按钮:hover {
+    background-color: #6ba0ff;
+}
+QPushButton#主按钮:pressed {
+    background-color: #3d78e0;
+}
+QPushButton#主按钮:disabled {
+    background-color: #2b3550;
+    color: #7a8294;
+}
+QProgressBar {
+    background-color: #1f232c;
+    border: none;
+    border-radius: 6px;
+    text-align: center;
+    color: #ffffff;
+    font-size: 12px;
+    min-height: 16px;
+    max-height: 16px;
+}
+QProgressBar::chunk {
+    background-color: #4f8cff;
+    border-radius: 6px;
+}
+QTableWidget {
+    background-color: #1f232c;
+    alternate-background-color: #232833;
+    color: #e8eaf0;
+    border: 1px solid #2e3440;
+    border-radius: 8px;
+    gridline-color: #2e3440;
+    font-size: 13px;
+}
+QTableWidget::item {
+    padding: 4px 8px;
+}
+QHeaderView::section {
+    background-color: #2b303b;
+    color: #c3cad9;
+    border: none;
+    border-bottom: 1px solid #2e3440;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-weight: bold;
+}
+QPlainTextEdit {
+    background-color: #0f1116;
+    color: #a8b3c5;
+    border: 1px solid #2e3440;
+    border-radius: 8px;
+    font-family: "Consolas", "Noto Sans Mono CJK SC", monospace;
+    font-size: 12px;
+    padding: 6px;
+}
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background: #3a4150;
+    border-radius: 5px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #4a5263;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 0;
+}
+QScrollBar::handle:horizontal {
+    background: #3a4150;
+    border-radius: 5px;
+    min-width: 30px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: #4a5263;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+}
+"""
+
+
+# ---------------------------------------------------------------- 主窗口
+
+class 导表窗口(QMainWindow):
+    """主窗口：来源目录、导出目录、文件列表、进度条、日志与开始按钮
+
+    注：槽函数使用英文命名，规避 PyQt6 对中文方法名信号连接的段错误。
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("导表工具 - Excel 转 JSON")
+        self.resize(720, 640)
+        self.setMinimumSize(640, 560)
+        self._线程 = None
+        self._构建界面()
+
+    def _构建界面(self) -> None:
+        根控件 = QWidget()
+        self.setCentralWidget(根控件)
+        主布局 = QVBoxLayout(根控件)
+        主布局.setContentsMargins(20, 18, 20, 18)
+        主布局.setSpacing(10)
+
+        # 标题区
+        标题 = QLabel("导表工具")
+        标题.setObjectName("标题")
+        副标题 = QLabel("将目录下所有 Excel 表导出为 JSON 配置文件")
+        副标题.setObjectName("副标题")
+        主布局.addWidget(标题)
+        主布局.addWidget(副标题)
+        主布局.addSpacing(6)
+
+        # 来源目录
+        来源行 = QHBoxLayout()
+        来源行.addWidget(QLabel("来源目录:"))
+        self.来源输入 = QLineEdit()
+        self.来源输入.setPlaceholderText("选择包含 xlsx 文件的目录")
+        来源行.addWidget(self.来源输入, 1)
+        来源按钮 = QPushButton("浏览...")
+        来源按钮.clicked.connect(self.choose_source_dir)
+        来源行.addWidget(来源按钮)
+        主布局.addLayout(来源行)
+
+        # 导出目录
+        导出行 = QHBoxLayout()
+        导出行.addWidget(QLabel("导出目录:"))
+        self.导出输入 = QLineEdit()
+        self.导出输入.setPlaceholderText("JSON 文件输出位置")
+        导出行.addWidget(self.导出输入, 1)
+        导出按钮 = QPushButton("浏览...")
+        导出按钮.clicked.connect(self.choose_export_dir)
+        导出行.addWidget(导出按钮)
+        主布局.addLayout(导出行)
+
+        # 文件列表
+        列表标题行 = QHBoxLayout()
+        列表标题 = QLabel("待导出文件")
+        列表标题.setObjectName("副标题")
+        列表标题行.addWidget(列表标题)
+        列表标题行.addStretch(1)
+        self.文件计数标签 = QLabel("共 0 个文件")
+        self.文件计数标签.setObjectName("副标题")
+        列表标题行.addWidget(self.文件计数标签)
+        主布局.addLayout(列表标题行)
+
+        self.文件表 = QTableWidget(0, 3)
+        self.文件表.setHorizontalHeaderLabels(["文件名", "导出结果", "生成文件"])
+        self.文件表.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.文件表.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.文件表.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.文件表.verticalHeader().setVisible(False)
+        self.文件表.setAlternatingRowColors(True)
+        self.文件表.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.文件表.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        主布局.addWidget(self.文件表, 1)
+
+        # 进度条与状态
+        self.进度条 = QProgressBar()
+        self.进度条.setTextVisible(True)
+        self.进度条.setRange(0, 1)
+        self.进度条.setValue(0)
+        主布局.addWidget(self.进度条)
+        self.状态标签 = QLabel("就绪")
+        self.状态标签.setObjectName("状态标签")
+        主布局.addWidget(self.状态标签)
+
+        # 日志
+        日志标题 = QLabel("导出日志")
+        日志标题.setObjectName("副标题")
+        主布局.addWidget(日志标题)
+        self.日志区 = QPlainTextEdit()
+        self.日志区.setReadOnly(True)
+        self.日志区.setMaximumHeight(130)
+        主布局.addWidget(self.日志区)
+
+        # 开始按钮
+        self.按钮开始 = QPushButton("开始导出")
+        self.按钮开始.setObjectName("主按钮")
+        self.按钮开始.clicked.connect(self.start_export)
+        主布局.addWidget(self.按钮开始)
+
+    # ------------------------------------------------------------ 交互
+
+    def choose_source_dir(self) -> None:
+        目录 = QFileDialog.getExistingDirectory(self, "选择来源目录", self.来源输入.text())
+        if 目录:
+            self.来源输入.setText(目录)
+            self.refresh_file_list()
+
+    def choose_export_dir(self) -> None:
+        目录 = QFileDialog.getExistingDirectory(self, "选择导出目录", self.导出输入.text())
+        if 目录:
+            self.导出输入.setText(目录)
+
+    def refresh_file_list(self) -> None:
+        """来源目录变化后，列出其中所有 xlsx 并预扫冲突"""
+        来源目录 = self.来源输入.text().strip()
+        if not os.path.isdir(来源目录):
+            return
+        xlsx列表 = sorted(f for f in os.listdir(来源目录) if f.lower().endswith(".xlsx"))
+        self.文件表.setRowCount(len(xlsx列表))
+        for 行, 文件名 in enumerate(xlsx列表):
+            self.文件表.setItem(行, 0, QTableWidgetItem(文件名))
+            self.文件表.setItem(行, 1, QTableWidgetItem("待导出"))
+            self.文件表.setItem(行, 2, QTableWidgetItem(""))
+        self.文件计数标签.setText(f"共 {len(xlsx列表)} 个文件")
+
+        # 预扫冲突并提示
+        路径列表 = [os.path.join(来源目录, f) for f in xlsx列表]
+        冲突 = 扫描根节点冲突(路径列表)
+        if 冲突:
+            说明 = self.format_conflict(冲突)
+            self.状态标签.setText("⚠ 检测到同名标记冲突，请检查")
+            self.append_log("警告：以下 json 文件由多个 excel 生成，后导出的会覆盖先前的：\n" + 说明)
+            QMessageBox.warning(self, "警告：存在重复生成的文件", 说明)
+        else:
+            self.状态标签.setText("就绪")
+
+    def validate_input(self):
+        来源目录 = self.来源输入.text().strip()
+        导出目录 = self.导出输入.text().strip()
+        if not 来源目录 or not os.path.isdir(来源目录):
+            QMessageBox.critical(self, "错误", "来源目录不存在")
+            return None
+        if not 导出目录:
+            QMessageBox.critical(self, "错误", "请填写导出目录")
+            return None
+        return 来源目录, 导出目录
+
+    def start_export(self) -> None:
+        if self._线程 is not None and self._线程.isRunning():
+            return
+        目录组 = self.validate_input()
+        if not 目录组:
+            return
+        来源目录, 导出目录 = 目录组
+
+        # 重置界面状态
+        self.按钮开始.setEnabled(False)
+        self.按钮开始.setText("导出中...")
+        self.进度条.setRange(0, 1)
+        self.进度条.setValue(0)
+        self.状态标签.setText("正在扫描...")
+        self.日志区.clear()
+        for 行 in range(self.文件表.rowCount()):
+            self.文件表.item(行, 1).setText("待导出")
+            self.文件表.item(行, 2).setText("")
+
+        self._线程 = ExportThread(来源目录, 导出目录, self)
+        self._线程.progress_signal.connect(self.update_progress)
+        self._线程.detail_signal.connect(self.update_file_detail)
+        self._线程.finished_signal.connect(self.show_finished)
+        self._线程.start()
+
+    def update_progress(self, 索引: int, 总数: int, 文件名: str) -> None:
+        self.进度条.setRange(0, 总数)
+        self.进度条.setValue(索引)
+        self.状态标签.setText(f"正在导出 {文件名} ({索引}/{总数})")
+
+    def update_file_detail(self, 文件名: str, json名, 错误详情) -> None:
+        """每个文件导出完成后更新表格与日志"""
+        for 行 in range(self.文件表.rowCount()):
+            if self.文件表.item(行, 0).text() == 文件名:
+                if 错误详情 is None:
+                    self.文件表.item(行, 1).setText("成功")
+                    self.文件表.item(行, 1).setForeground(QColor("#4ade80"))
+                    self.文件表.item(行, 2).setText(json名 or "")
+                    self.append_log(f"✔ {文件名} → {json名}")
+                else:
+                    self.文件表.item(行, 1).setText("失败")
+                    self.文件表.item(行, 1).setForeground(QColor("#f87171"))
+                    self.文件表.item(行, 2).setText("")
+                    self.append_log(f"✘ {文件名} 失败：\n{错误详情}")
+                break
+
+    def show_finished(self, 结果: dict) -> None:
+        self.按钮开始.setEnabled(True)
+        self.按钮开始.setText("开始导出")
+        成功数 = 结果["成功"]
+        失败数 = 结果["失败"]
+        冲突 = 结果["冲突"]
+        提示文本 = f"导出完成：成功 {成功数} 个，失败 {失败数} 个"
+        self.状态标签.setText(提示文本)
+        if 成功数 == 0 and 失败数 > 0:
+            QMessageBox.critical(self, "导出失败", self.format_error(结果["错误列表"]))
+        elif 冲突:
+            说明 = self.format_conflict(冲突)
+            QMessageBox.warning(self, "警告：存在重复生成的文件", 说明)
+            self.状态标签.setText(提示文本 + "（存在重复覆盖警告）")
+        elif 失败数 > 0:
+            QMessageBox.warning(self, "部分文件导出失败", self.format_error(结果["错误列表"]))
+        else:
+            QMessageBox.information(self, "完成", 提示文本)
+
+    def append_log(self, 文本: str) -> None:
+        self.日志区.appendPlainText(文本)
+
+    @staticmethod
+    def format_error(错误列表: list) -> str:
+        return "\n\n".join(f"{文件名}:\n{详情}" for 文件名, 详情 in 错误列表)
+
+    @staticmethod
+    def format_conflict(冲突: dict) -> str:
+        行列表 = ["以下 json 文件由多个 excel 生成（表标记同名），后导出的会覆盖先前的："]
+        for 文件名, 来源 in 冲突.items():
+            行列表.append(f"\n{文件名}")
+            for 源文件 in 来源:
+                行列表.append(f"  ← {源文件}")
+        return "\n".join(行列表)
+
+    def closeEvent(self, 事件) -> None:
+        """关闭窗口时确保后台线程结束"""
+        if self._线程 is not None and self._线程.isRunning():
+            self._线程.wait(3000)
+        事件.accept()
+
+
+# ---------------------------------------------------------------- 命令行模式
+
+def 命令行导出(来源目录: str, 导出目录: str) -> int:
+    """无窗口自检模式：打印进度与结果，供自动化验证"""
+    结果 = 导出全部(来源目录, 导出目录, lambda 索引, 总数, 文件名: print(f"[{索引}/{总数}] {文件名}"))
+    print(f"完成：成功 {结果['成功']} 个，失败 {结果['失败']} 个")
+    if 结果["冲突"]:
+        print("警告：以下 json 文件由多个 excel 生成，后导出的会覆盖先前的：")
+        for 文件名, 来源 in 结果["冲突"].items():
+            print(f"  {文件名} <- {来源}")
+    if 结果["错误列表"]:
+        for 文件名, 详情 in 结果["错误列表"]:
+            print(f"失败 {文件名}:\n{详情}")
+        return 1
+    return 0
+
+
+def 主函数() -> None:
+    if 常量_自检参数 in sys.argv:
+        位置参数 = [参数 for 参数 in sys.argv[1:] if 参数 != 常量_自检参数]
+        if len(位置参数) != 2:
+            print(f"用法：python3 {__file__} {常量_自检参数} <来源目录> <导出目录>")
+            sys.exit(2)
+        sys.exit(命令行导出(位置参数[0], 位置参数[1]))
+
+    # 高分屏适配
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
+    应用 = QApplication(sys.argv)
+    应用.setStyleSheet(深色样式表)
+    # 中文字体优先
+    字体 = QFont()
+    字体.setFamilies(["Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", "WenQuanYi Micro Hei", "sans-serif"])
+    应用.setFont(字体)
+    窗口 = 导表窗口()
+    窗口.show()
+    sys.exit(应用.exec())
+
+
+if __name__ == "__main__":
+    主函数()
