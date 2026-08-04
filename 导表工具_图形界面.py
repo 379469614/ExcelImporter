@@ -123,7 +123,10 @@ def 构建导出上下文(xlsx路径: str, 导出目录: str) -> 导出上下文
 def 导出全部(来源目录: str, 导出目录: str, 进度回调, 明细回调=None) -> dict:
     os.makedirs(导出目录, exist_ok=True)
     xlsx列表 = sorted(
-        文件名 for 文件名 in os.listdir(来源目录) if 文件名.lower().endswith(".xlsx")
+        文件名
+        for 文件名 in os.listdir(来源目录)
+        if 文件名.lower().endswith(".xlsx")
+        and not 文件名.startswith((".~", "~$"))  # 过滤 Office 临时锁定文件
     )
     xlsx路径列表 = [os.path.join(来源目录, 文件名) for 文件名 in xlsx列表]
     冲突 = 扫描根节点冲突(xlsx路径列表)
@@ -441,7 +444,12 @@ class 导表窗口(QMainWindow):
         来源目录 = 解析路径(self.来源输入.text())
         if not os.path.isdir(来源目录):
             return
-        xlsx列表 = sorted(文件名 for 文件名 in os.listdir(来源目录) if 文件名.lower().endswith(".xlsx"))
+        xlsx列表 = sorted(
+            文件名
+            for 文件名 in os.listdir(来源目录)
+            if 文件名.lower().endswith(".xlsx")
+            and not 文件名.startswith((".~", "~$"))  # 过滤 Office 临时锁定文件
+        )
         self.文件表.setRowCount(len(xlsx列表))
         for 行, 文件名 in enumerate(xlsx列表):
             self.文件表.setItem(行, 0, QTableWidgetItem(文件名))
