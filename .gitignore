@@ -1,1 +1,5 @@
 *.pyc
+build/
+dist/
+*.spec
+导表工具

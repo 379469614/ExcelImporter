@@ -10,11 +10,51 @@
 注意：因 PyQt6 对非 ASCII 方法名的信号连接存在段错误 bug
 （clicked.connect(self.中文方法) 会崩溃），类方法统一使用英文命名。
 """
+import multiprocessing
 import os
 import sys
 import traceback
 
 常量_自检参数 = "--命令行"
+
+# 是否为 PyInstaller 打包后的可执行程序
+是打包程序 = getattr(sys, "frozen", False)
+if 是打包程序:
+    程序目录 = os.path.dirname(sys.executable)
+else:
+    程序目录 = os.path.dirname(os.path.abspath(__file__))
+
+# 路径基准：开发态为脚本所在目录的上一级目录（保持历史行为）；
+# 打包后没有脚本目录，以可执行文件所在目录为基准（sample、output 就放在 exe 旁边）。
+# 来源目录/导出目录在界面中均以相对该目录的路径填写（如 sample、output）。
+路径基准目录 = 程序目录 if 是打包程序 else os.path.dirname(程序目录)
+
+
+def 解析路径(输入: str) -> str:
+    """将界面填写的路径解析为绝对路径。
+
+    绝对路径原样返回；相对路径以「脚本所在目录的上一级目录」为基准拼接。
+    """
+    输入 = (输入 or "").strip()
+    if not 输入:
+        return 输入
+    if os.path.isabs(输入):
+        return os.path.normpath(输入)
+    return os.path.normpath(os.path.join(路径基准目录, 输入))
+
+
+def 转相对路径(绝对路径: str) -> str:
+    """将绝对路径转为相对「脚本所在目录上一级目录」的路径，供界面回填显示。
+
+    若目标不在基准目录之下（如跨盘符），则原样返回绝对路径。
+    """
+    try:
+        相对 = os.path.relpath(绝对路径, 路径基准目录)
+    except ValueError:  # Windows 跨盘符
+        return 绝对路径
+    if 相对.startswith(".."):
+        return 绝对路径
+    return 相对
 
 
 def 引导自带依赖() -> None:
@@ -334,7 +374,7 @@ class 导表窗口(QMainWindow):
         来源行 = QHBoxLayout()
         来源行.addWidget(QLabel("来源目录:"))
         self.来源输入 = QLineEdit()
-        self.来源输入.setPlaceholderText("选择包含 xlsx 文件的目录")
+        self.来源输入.setPlaceholderText("相对脚本上一级目录的路径，如 sample")
         来源行.addWidget(self.来源输入, 1)
         来源按钮 = QPushButton("浏览...")
         来源按钮.clicked.connect(self.choose_source_dir)
@@ -345,7 +385,7 @@ class 导表窗口(QMainWindow):
         导出行 = QHBoxLayout()
         导出行.addWidget(QLabel("导出目录:"))
         self.导出输入 = QLineEdit()
-        self.导出输入.setPlaceholderText("JSON 文件输出位置")
+        self.导出输入.setPlaceholderText("相对脚本上一级目录的路径，如 output")
         导出行.addWidget(self.导出输入, 1)
         导出按钮 = QPushButton("浏览...")
         导出按钮.clicked.connect(self.choose_export_dir)
@@ -402,19 +442,21 @@ class 导表窗口(QMainWindow):
     # ------------------------------------------------------------ 交互
 
     def choose_source_dir(self) -> None:
-        目录 = QFileDialog.getExistingDirectory(self, "选择来源目录", self.来源输入.text())
+        起始 = 解析路径(self.来源输入.text()) or 路径基准目录
+        目录 = QFileDialog.getExistingDirectory(self, "选择来源目录", 起始)
         if 目录:
-            self.来源输入.setText(目录)
+            self.来源输入.setText(转相对路径(目录))
             self.refresh_file_list()
 
     def choose_export_dir(self) -> None:
-        目录 = QFileDialog.getExistingDirectory(self, "选择导出目录", self.导出输入.text())
+        起始 = 解析路径(self.导出输入.text()) or 路径基准目录
+        目录 = QFileDialog.getExistingDirectory(self, "选择导出目录", 起始)
         if 目录:
-            self.导出输入.setText(目录)
+            self.导出输入.setText(转相对路径(目录))
 
     def refresh_file_list(self) -> None:
         """来源目录变化后，列出其中所有 xlsx 并预扫冲突"""
-        来源目录 = self.来源输入.text().strip()
+        来源目录 = 解析路径(self.来源输入.text())
         if not os.path.isdir(来源目录):
             return
         xlsx列表 = sorted(f for f in os.listdir(来源目录) if f.lower().endswith(".xlsx"))
@@ -437,8 +479,8 @@ class 导表窗口(QMainWindow):
             self.状态标签.setText("就绪")
 
     def validate_input(self):
-        来源目录 = self.来源输入.text().strip()
-        导出目录 = self.导出输入.text().strip()
+        来源目录 = 解析路径(self.来源输入.text())
+        导出目录 = 解析路径(self.导出输入.text())
         if not 来源目录 or not os.path.isdir(来源目录):
             QMessageBox.critical(self, "错误", "来源目录不存在")
             return None
@@ -538,7 +580,12 @@ class 导表窗口(QMainWindow):
 # ---------------------------------------------------------------- 命令行模式
 
 def 命令行导出(来源目录: str, 导出目录: str) -> int:
-    """无窗口自检模式：打印进度与结果，供自动化验证"""
+    """无窗口自检模式：打印进度与结果，供自动化验证
+
+    支持与界面一致：路径可填相对「脚本所在目录上一级目录」的相对路径。
+    """
+    来源目录 = 解析路径(来源目录)
+    导出目录 = 解析路径(导出目录)
     结果 = 导出全部(来源目录, 导出目录, lambda 索引, 总数, 文件名: print(f"[{索引}/{总数}] {文件名}"))
     print(f"完成：成功 {结果['成功']} 个，失败 {结果['失败']} 个")
     if 结果["冲突"]:
@@ -553,6 +600,7 @@ def 命令行导出(来源目录: str, 导出目录: str) -> int:
 
 
 def 主函数() -> None:
+    multiprocessing.freeze_support()  # PyInstaller 打包后 multiprocessing 需要
     if 常量_自检参数 in sys.argv:
         位置参数 = [参数 for 参数 in sys.argv[1:] if 参数 != 常量_自检参数]
         if len(位置参数) != 2:
