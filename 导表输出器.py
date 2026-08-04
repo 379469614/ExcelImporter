@@ -33,10 +33,9 @@ def 生成换行(缩进层级: int) -> str:
 
 
 # 将基础类型的值作为属性或子元素写入 XML 父节点。
-def 构建基础节点(父节点, 名称: str, 值, 是否禁用复数: bool = False) -> None:
+def 构建基础节点(父节点, 名称: str, 值) -> None:
     值 = str(值)
-    列表标签 = 名称 if 是否禁用复数 else 名称 + "s"
-    if 父节点.tag == 列表标签:
+    if 父节点.tag == 名称:
         元素 = ElementTree.Element(名称)
         元素.text = 值
         父节点.append(元素)
@@ -45,37 +44,36 @@ def 构建基础节点(父节点, 名称: str, 值, 是否禁用复数: bool = F
 
 
 # 将列表值构建为 XML 子节点序列，每条数据递归调用构建节点。
-def 构建列表节点(父节点, 名称: str, 列表, 是否禁用复数: bool = False) -> None:
+def 构建列表节点(父节点, 名称: str, 列表) -> None:
     元素 = ElementTree.Element(名称)
     父节点.append(元素)
-    条目名称 = 名称 if 是否禁用复数 else 名称[:-1]
     for 值 in 列表:
-        构建节点(元素, 条目名称, 值, 是否禁用复数)
+        构建节点(元素, 名称, 值)
 
 
 # 将字典对象构建为 XML 子节点序列，每个键值递归调用构建节点。
-def 构建对象节点(父节点, 名称: str, 对象, 是否禁用复数: bool = False) -> None:
+def 构建对象节点(父节点, 名称: str, 对象) -> None:
     元素 = ElementTree.Element(名称)
     父节点.append(元素)
     for 键, 值 in 对象.items():
-        构建节点(元素, 键, 值, 是否禁用复数)
+        构建节点(元素, 键, 值)
 
 
 # 依据值类型分发到基础、列表或对象三种 XML 构建方式。
-def 构建节点(父节点, 名称: str, 值, 是否禁用复数: bool = False) -> None:
+def 构建节点(父节点, 名称: str, 值) -> None:
     if isinstance(值, int) or isinstance(值, float) or isinstance(值, str):
-        构建基础节点(父节点, 名称, 值, 是否禁用复数)
+        构建基础节点(父节点, 名称, 值)
     elif isinstance(值, list):
-        构建列表节点(父节点, 名称, 值, 是否禁用复数)
+        构建列表节点(父节点, 名称, 值)
     elif isinstance(值, dict):
-        构建对象节点(父节点, 名称, 值, 是否禁用复数)
+        构建对象节点(父节点, 名称, 值)
 
 
 # 将导出记录的根对象序列化写入 XML 文件，并打印保存信息。
-def 保存为XML(记录: 导出记录, 是否禁用复数: bool = False) -> None:
+def 保存为XML(记录: 导出记录) -> None:
     书 = ElementTree.ElementTree()
     书.append = lambda 元素: 书._setroot(元素)
-    构建节点(书, 记录.根名称, 记录.对象, 是否禁用复数)
+    构建节点(书, 记录.根名称, 记录.对象)
 
     xml字符串 = ElementTree.tostring(书.getroot(), "utf-8")
     文档 = minidom.parseString(xml字符串)

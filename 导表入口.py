@@ -31,7 +31,6 @@ class 导出上下文:
     -m      : use the count of multiprocesses to export, default is cpu count
     -c      : a file path, save the excel structure to json
               the external program uses this file to automatically generate the read code
-    -x      : disable auto plural naming (do not append 's')
     -h      : print this help message and exit
 
     https://github.com/yanghuan/proton
@@ -46,7 +45,6 @@ class 导出上下文:
         self.对象分隔符: str = ";"
         self.代码生成器: str | None = None
         self.多进程数量: int | None = None
-        self.禁用复数: bool = False
 
 
 # 构建默认上下文并封装导出器单文件导出，异常时返回堆栈文本。
@@ -120,7 +118,7 @@ def 导出多个文件(上下文: 导出上下文) -> None:
 # 解析命令行参数并填充上下文，随后执行批量导出。
 def 主函数() -> None:
     print("argv:", sys.argv)
-    选项列表, 参数列表 = getopt.getopt(sys.argv[1:], "p:f:e:s:t:r:m:c:xh")
+    选项列表, 参数列表 = getopt.getopt(sys.argv[1:], "p:f:e:s:t:r:m:c:h")
 
     上下文 = 导出上下文()
     上下文.路径 = None
@@ -131,7 +129,6 @@ def 主函数() -> None:
     上下文.对象分隔符 = ";"
     上下文.代码生成器 = None
     上下文.多进程数量 = None
-    上下文.禁用复数 = False
 
     for 选项, 值 in 选项列表:
         if 选项 == "-p":
@@ -150,8 +147,6 @@ def 主函数() -> None:
             上下文.多进程数量 = int(值) if 值 is not None else None
         elif 选项 == "-c":
             上下文.代码生成器 = 值
-        elif 选项 == "-x":
-            上下文.禁用复数 = True
         elif 选项 == "-h":
             print(导出上下文.__doc__)
             sys.exit()
