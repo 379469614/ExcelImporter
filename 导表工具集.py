@@ -27,7 +27,7 @@ def 填充值(父容器: list | dict, 名称: str, 值, 是模式: bool) -> None
     if isinstance(父容器, list):
         父容器.append(值)
     else:
-        if 是模式 and not re.match(r"^_|[a-zA-Z]\w*$", 名称):
+        if 是模式 and not re.match(r"^_|[a-zA-Z\u4e00-\u9fa5]\w*$", 名称):
             raise ValueError(f"{名称} 是不合法的标识符")
         父容器[名称] = 值
 
@@ -51,7 +51,7 @@ def 获取模式信息(类型, 描述: str | None) -> list:
 
 # 从工作表名称中识别导出标记，无匹配标记时返回 False。
 def 获取导出标记(工作表名称: str) -> str | bool:
-    匹配 = re.search(r"\|[" + string.whitespace + r"]*(_|[a-zA-Z]\w+)", 工作表名称)
+    匹配 = re.search(r"\|[" + string.whitespace + r"]*(\w+)", 工作表名称)
     return 匹配.group(1) if 匹配 else False
 
 

@@ -98,8 +98,8 @@ def 扫描根节点冲突(xlsx路径列表: list) -> dict:
                     表 = 工作簿.sheets[名称]
                     导出实例 = 导出器(上下文)
                     是配置表 = 导出实例.获取配置表标题信息(表) is not None
-                    # 数据表输出复数文件名（标记 Hero → Heros.json），配置表保持原名
-                    文件名 = 标记 if 是配置表 else 标记 + "s"
+                    # 数据表与配置表均直接以标记作为文件名
+                    文件名 = 标记
                     标记到来源.setdefault(文件名 + ".json", []).append(路径)
     return {文件名: 来源 for 文件名, 来源 in 标记到来源.items() if len(来源) > 1}
 
