@@ -322,8 +322,12 @@ class 导出器:
                 raise  # A 列重复错误原样上抛，不追加行号信息
 
             except Exception as 异常:
-                异常.args += (f"{工作表.name} 在 {self.行索引 + 1} 行 {self.列索引 + 1}（{名称}）处于 {self.路径} 出错", "")
-                raise 异常
+                # 数据解析错误定位到具体单元格（列字母 + 实际行号），提示该行数据不合法
+                列字母 = 导表工具集.获取列字母(self.列索引 + 1)
+                raise ValueError(
+                    f"{os.path.basename(self.路径)}的{self.工作表名称}的"
+                    f"{列字母}{self.行索引 + 1}单元格数据不合法"
+                ) from 异常
 
         return (模式对象, 对象)
 
@@ -371,8 +375,13 @@ class 导出器:
                     空行计数 = 0
 
         except Exception as 异常:
-            异常.args += (f"{工作表.name} 在 {self.行索引 + 1} 行（{类型}，{名称}，{值}）于 {self.路径} 出错", "")
-            raise 异常
+            # 类型非法定位到类型列，其余数据错误定位到值列（列字母 + 实际行号）
+            错误列索引 = 类型索引 if "不是合法类型" in str(异常) else 值索引
+            列字母 = 导表工具集.获取列字母(错误列索引 + 1)
+            raise ValueError(
+                f"{os.path.basename(self.路径)}的{self.工作表名称}的"
+                f"{列字母}{self.行索引 + 1}单元格数据不合法"
+            ) from 异常
 
         return (模式对象, 对象)
 
