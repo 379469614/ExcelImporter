@@ -3,3 +3,4 @@ build/
 dist/
 *.spec
 导表工具
+测试配置/
