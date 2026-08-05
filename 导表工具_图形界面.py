@@ -19,7 +19,7 @@ import traceback
 import sxl
 import 导表工具集
 from 导表核心 import 导出器
-from 导表入口 import 导出上下文, 导出单个文件
+from 导表入口 import 导出上下文
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
@@ -132,21 +132,19 @@ def 导出全部(来源目录: str, 导出目录: str, 进度回调, 明细回�
     冲突 = 扫描根节点冲突(xlsx路径列表)
     导出结果列表 = []
     错误列表 = []
+    key重复列表 = []
     总数 = len(xlsx路径列表)
     for 索引, xlsx路径 in enumerate(xlsx路径列表, start=1):
         文件名 = os.path.basename(xlsx路径)
         进度回调(索引, 总数, 文件名)
         try:
-            导出结果 = 导出单个文件(构建导出上下文(xlsx路径, 导出目录), xlsx路径)
-            if isinstance(导出结果, str):
-                错误列表.append((文件名, 导出结果))
-                if 明细回调:
-                    明细回调(文件名, None, 导出结果)
-            else:
-                导出结果列表.append(导出结果)
-                json名 = ", ".join(schema["exportfile"] for schema in 导出结果)
-                if 明细回调:
-                    明细回调(文件名, json名, None)
+            导出实例 = 导出器(构建导出上下文(xlsx路径, 导出目录))
+            导出结果 = 导出实例.导出(xlsx路径)
+            导出结果列表.append(导出结果)
+            key重复列表.extend(导出实例.跳过提示列表)
+            json名 = ", ".join(schema["exportfile"] for schema in 导出结果)
+            if 明细回调:
+                明细回调(文件名, json名, None)
         except Exception as 异常:  # 单个文件失败不中断整体流程
             错误列表.append((文件名, repr(异常)))
             if 明细回调:
@@ -156,6 +154,7 @@ def 导出全部(来源目录: str, 导出目录: str, 进度回调, 明细回�
         "失败": len(错误列表),
         "错误列表": 错误列表,
         "冲突": 冲突,
+        "key重复列表": key重复列表,
     }
 
 
@@ -191,6 +190,7 @@ class ExportThread(QThread):
                 "失败": 1,
                 "错误列表": [("整体流程", traceback.format_exc())],
                 "冲突": {},
+                "key重复列表": [],
             }
         self.finished_signal.emit(结果)
 
@@ -525,22 +525,30 @@ class 导表窗口(QMainWindow):
                     self.append_log(f"✘ {文件名} 失败：\n{错误详情}")
                 break
 
+    @staticmethod
+    def format_key_duplicate(key重复列表: list) -> str:
+        """key 重复提示段落，未发生时返回空字符串"""
+        if not key重复列表:
+            return ""
+        return "\n\n⚠ 以下表因 key 重复已跳过未导出：\n  - " + "\n  - ".join(key重复列表)
+
     def show_finished(self, 结果: dict) -> None:
         self.按钮开始.setEnabled(True)
         self.按钮开始.setText("开始导出")
         成功数 = 结果["成功"]
         失败数 = 结果["失败"]
         冲突 = 结果["冲突"]
-        提示文本 = f"导出完成：成功 {成功数} 个，失败 {失败数} 个"
-        self.状态标签.setText(提示文本)
+        key重复段落 = self.format_key_duplicate(结果.get("key重复列表", []))
+        提示文本 = f"导出完成：成功 {成功数} 个，失败 {失败数} 个" + key重复段落
+        self.状态标签.setText(f"导出完成：成功 {成功数} 个，失败 {失败数} 个")
         if 成功数 == 0 and 失败数 > 0:
-            QMessageBox.critical(self, "导出失败", self.format_error(结果["错误列表"]))
+            QMessageBox.critical(self, "导出失败", self.format_error(结果["错误列表"]) + key重复段落)
         elif 冲突:
-            说明 = self.format_conflict(冲突)
+            说明 = self.format_conflict(冲突) + key重复段落
             QMessageBox.warning(self, "警告：存在重复生成的文件", 说明)
             self.状态标签.setText(提示文本 + "（存在重复覆盖警告）")
         elif 失败数 > 0:
-            QMessageBox.warning(self, "部分文件导出失败", self.format_error(结果["错误列表"]))
+            QMessageBox.warning(self, "部分文件导出失败", self.format_error(结果["错误列表"]) + key重复段落)
         else:
             QMessageBox.information(self, "完成", 提示文本)
 
@@ -573,6 +581,10 @@ class 导表窗口(QMainWindow):
 def 命令行导出() -> int:
     结果 = 导出全部(固定来源路径, 固定导出路径, lambda 索引, 总数, 文件名: print(f"[{索引}/{总数}] {文件名}"))
     print(f"完成：成功 {结果['成功']} 个，失败 {结果['失败']} 个")
+    if 结果["key重复列表"]:
+        print("⚠ 以下表因 key 重复已跳过未导出：")
+        for 提示 in 结果["key重复列表"]:
+            print(f"  - {提示}")
     if 结果["冲突"]:
         print("警告：以下 json 文件由多个 excel 生成，后导出的会覆盖先前的：")
         for 文件名, 来源 in 结果["冲突"].items():
