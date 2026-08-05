@@ -4,7 +4,7 @@
 - 深色现代主题（QSS 样式）
 - 导出前预扫描同名表标记冲突（不同 xlsx 生成同名 json 相互覆盖）
 - 后台线程导出，界面不卡顿
-- 文件列表实时显示每个文件的导出状态
+- 逐文件进度条 + 导出日志
 - 保留 --命令行 自检模式，供自动化验证
 
 注意：因 PyQt6 对非 ASCII 方法名的信号连接存在段错误 bug
@@ -22,7 +22,7 @@ from 导表核心 import 导出器
 from 导表入口 import 导出上下文
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -34,11 +34,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QMessageBox,
     QProgressBar,
-    QTableWidget,
-    QTableWidgetItem,
-    QHeaderView,
     QPlainTextEdit,
-    QAbstractItemView,
 )
 
 
@@ -262,38 +258,19 @@ QPushButton#主按钮:disabled {
 }
 QProgressBar {
     background-color: #1f232c;
-    border: none;
-    border-radius: 6px;
+    border: 2px solid #2e3440;
+    border-radius: 14px;
     text-align: center;
     color: #ffffff;
-    font-size: 12px;
-    min-height: 16px;
-    max-height: 16px;
+    font-size: 14px;
+    font-weight: bold;
+    min-height: 28px;
+    max-height: 28px;
 }
 QProgressBar::chunk {
-    background-color: #4f8cff;
-    border-radius: 6px;
-}
-QTableWidget {
-    background-color: #1f232c;
-    alternate-background-color: #232833;
-    color: #e8eaf0;
-    border: 1px solid #2e3440;
-    border-radius: 8px;
-    gridline-color: #2e3440;
-    font-size: 13px;
-}
-QTableWidget::item {
-    padding: 4px 8px;
-}
-QHeaderView::section {
-    background-color: #2b303b;
-    color: #c3cad9;
-    border: none;
-    border-bottom: 1px solid #2e3440;
-    padding: 6px 8px;
-    font-size: 12px;
-    font-weight: bold;
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #3d78e0, stop:0.5 #4f8cff, stop:1 #6ba0ff);
+    border-radius: 12px;
 }
 QPlainTextEdit {
     background-color: #0f1116;
@@ -342,7 +319,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
 # ---------------------------------------------------------------- 主窗口
 
 class 导表窗口(QMainWindow):
-    """主窗口：来源目录、导出目录、文件列表、进度条、日志与开始按钮
+    """主窗口：来源目录、导出目录、进度条、日志与开始按钮
 
     注：槽函数使用英文命名，规避 PyQt6 对中文方法名信号连接的段错误。
     """
@@ -354,7 +331,7 @@ class 导表窗口(QMainWindow):
         self.setMinimumSize(640, 560)
         self._线程 = None
         self._构建界面()
-        self.refresh_file_list()
+        self.预扫冲突()
 
     def _构建界面(self) -> None:
         根控件 = QWidget()
@@ -390,28 +367,6 @@ class 导表窗口(QMainWindow):
         导出行.addWidget(self.导出输入, 1)
         主布局.addLayout(导出行)
 
-        # 文件列表
-        列表标题行 = QHBoxLayout()
-        列表标题 = QLabel("待导出文件")
-        列表标题.setObjectName("副标题")
-        列表标题行.addWidget(列表标题)
-        列表标题行.addStretch(1)
-        self.文件计数标签 = QLabel("共 0 个文件")
-        self.文件计数标签.setObjectName("副标题")
-        列表标题行.addWidget(self.文件计数标签)
-        主布局.addLayout(列表标题行)
-
-        self.文件表 = QTableWidget(0, 3)
-        self.文件表.setHorizontalHeaderLabels(["文件名", "导出结果", "生成文件"])
-        self.文件表.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.文件表.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.文件表.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.文件表.verticalHeader().setVisible(False)
-        self.文件表.setAlternatingRowColors(True)
-        self.文件表.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.文件表.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        主布局.addWidget(self.文件表, 1)
-
         # 进度条与状态
         self.进度条 = QProgressBar()
         self.进度条.setTextVisible(True)
@@ -421,6 +376,8 @@ class 导表窗口(QMainWindow):
         self.状态标签 = QLabel("就绪")
         self.状态标签.setObjectName("状态标签")
         主布局.addWidget(self.状态标签)
+        self.状态标签.setWordWrap(True)
+        主布局.addStretch(1)
 
         # 日志
         日志标题 = QLabel("导出日志")
@@ -439,8 +396,8 @@ class 导表窗口(QMainWindow):
 
     # ------------------------------------------------------------ 交互
 
-    def refresh_file_list(self) -> None:
-        """来源目录变化后，列出其中所有 xlsx 并预扫冲突"""
+    def 预扫冲突(self) -> None:
+        """启动时预扫来源目录 xlsx，检测不同文件同名标记生成的 json 相互覆盖"""
         来源目录 = 解析路径(self.来源输入.text())
         if not os.path.isdir(来源目录):
             return
@@ -450,14 +407,6 @@ class 导表窗口(QMainWindow):
             if 文件名.lower().endswith(".xlsx")
             and not 文件名.startswith((".~", "~$"))  # 过滤 Office 临时锁定文件
         )
-        self.文件表.setRowCount(len(xlsx列表))
-        for 行, 文件名 in enumerate(xlsx列表):
-            self.文件表.setItem(行, 0, QTableWidgetItem(文件名))
-            self.文件表.setItem(行, 1, QTableWidgetItem("待导出"))
-            self.文件表.setItem(行, 2, QTableWidgetItem(""))
-        self.文件计数标签.setText(f"共 {len(xlsx列表)} 个文件")
-
-        # 预扫冲突并提示
         路径列表 = [os.path.join(来源目录, 文件名) for 文件名 in xlsx列表]
         冲突 = 扫描根节点冲突(路径列表)
         if 冲突:
@@ -494,9 +443,6 @@ class 导表窗口(QMainWindow):
         self.进度条.setValue(0)
         self.状态标签.setText("正在扫描...")
         self.日志区.clear()
-        for 行 in range(self.文件表.rowCount()):
-            self.文件表.item(行, 1).setText("待导出")
-            self.文件表.item(行, 2).setText("")
 
         self._线程 = ExportThread(来源目录, 导出目录, self)
         self._线程.progress_signal.connect(self.update_progress)
@@ -510,20 +456,11 @@ class 导表窗口(QMainWindow):
         self.状态标签.setText(f"正在导出 {文件名} ({索引}/{总数})")
 
     def update_file_detail(self, 文件名: str, json名, 错误详情) -> None:
-        """每个文件导出完成后更新表格与日志"""
-        for 行 in range(self.文件表.rowCount()):
-            if self.文件表.item(行, 0).text() == 文件名:
-                if 错误详情 is None:
-                    self.文件表.item(行, 1).setText("成功")
-                    self.文件表.item(行, 1).setForeground(QColor("#4ade80"))
-                    self.文件表.item(行, 2).setText(json名 or "")
-                    self.append_log(f"✔ {文件名} → {json名}")
-                else:
-                    self.文件表.item(行, 1).setText("失败")
-                    self.文件表.item(行, 1).setForeground(QColor("#f87171"))
-                    self.文件表.item(行, 2).setText("")
-                    self.append_log(f"✘ {文件名} 失败：\n{错误详情}")
-                break
+        """每个文件导出完成后更新日志"""
+        if 错误详情 is None:
+            self.append_log(f"✔ {文件名} → {json名}")
+        else:
+            self.append_log(f"✘ {文件名} 失败：\n{错误详情}")
 
     @staticmethod
     def format_key_duplicate(key重复列表: list) -> str:
