@@ -128,6 +128,7 @@ def 导出全部(来源目录: str, 导出目录: str, 进度回调, 明细回�
     冲突 = 扫描根节点冲突(xlsx路径列表)
     成功数 = 0
     错误列表 = []
+    跳过列表 = []
     key重复列表 = []
     总数 = len(xlsx路径列表)
     for 索引, xlsx路径 in enumerate(xlsx路径列表, start=1):
@@ -138,26 +139,32 @@ def 导出全部(来源目录: str, 导出目录: str, 进度回调, 明细回�
             导出实例.导出(xlsx路径)
             key重复列表.extend(导出实例.跳过提示列表)
             # 以是否实际产出导出文件为成功判据：
-            # 全表因 key 重复被跳过（零输出）不能计入成功，应归入失败。
+            # 全部表因 key 重复被跳过（零输出）的文件单独计入跳过，不入成功也不入失败。
             已导出记录 = [记录 for 记录 in 导出实例.记录列表 if 记录.对象]
             if 已导出记录:
                 成功数 += 1
                 json名 = ", ".join(os.path.basename(记录.导出文件) for 记录 in 已导出记录)
                 if 明细回调:
-                    明细回调(文件名, json名, None)
-            else:
-                跳过详情 = "\n".join(导出实例.跳过提示列表) or "未识别到可导出的表"
-                错误列表.append((文件名, f"未导出任何表（全部被跳过）：\n{跳过详情}"))
+                    明细回调(文件名, json名, None, "成功")
+            elif 导出实例.跳过提示列表:
+                跳过详情 = "\n".join(导出实例.跳过提示列表)
+                跳过列表.append((文件名, 跳过详情))
                 if 明细回调:
-                    明细回调(文件名, None, f"未导出任何表（全部被跳过）：\n{跳过详情}")
+                    明细回调(文件名, None, 跳过详情, "跳过")
+            else:
+                错误列表.append((文件名, "未识别到可导出的表"))
+                if 明细回调:
+                    明细回调(文件名, None, "未识别到可导出的表", "失败")
         except Exception as 异常:  # 单个文件失败不中断整体流程
             错误列表.append((文件名, repr(异常)))
             if 明细回调:
-                明细回调(文件名, None, repr(异常))
+                明细回调(文件名, None, repr(异常), "失败")
     return {
         "成功": 成功数,
         "失败": len(错误列表),
         "错误列表": 错误列表,
+        "跳过": len(跳过列表),
+        "跳过列表": 跳过列表,
         "冲突": 冲突,
         "key重复列表": key重复列表,
     }
@@ -173,7 +180,7 @@ class ExportThread(QThread):
     """
 
     progress_signal = pyqtSignal(int, int, str)
-    detail_signal = pyqtSignal(str, str, object)
+    detail_signal = pyqtSignal(str, str, object, str)
     finished_signal = pyqtSignal(dict)
 
     def __init__(self, 来源目录: str, 导出目录: str, 父对象=None):
@@ -194,6 +201,8 @@ class ExportThread(QThread):
                 "成功": 0,
                 "失败": 1,
                 "错误列表": [("整体流程", traceback.format_exc())],
+                "跳过": 0,
+                "跳过列表": [],
                 "冲突": {},
                 "key重复列表": [],
             }
@@ -464,10 +473,12 @@ class 导表窗口(QMainWindow):
         self.进度条.setValue(索引)
         self.状态标签.setText(f"正在导出 {文件名} ({索引}/{总数})")
 
-    def update_file_detail(self, 文件名: str, json名, 错误详情) -> None:
+    def update_file_detail(self, 文件名: str, json名, 错误详情, 状态: str) -> None:
         """每个文件导出完成后更新日志"""
-        if 错误详情 is None:
+        if 状态 == "成功":
             self.append_log(f"✔ {文件名} → {json名}")
+        elif 状态 == "跳过":
+            self.append_log(f"⏭ {文件名} 全部跳过：\n{错误详情}")
         else:
             self.append_log(f"✘ {文件名} 失败：\n{错误详情}")
 
@@ -483,18 +494,25 @@ class 导表窗口(QMainWindow):
         self.按钮开始.setText("开始导出")
         成功数 = 结果["成功"]
         失败数 = 结果["失败"]
+        跳过数 = 结果.get("跳过", 0)
         冲突 = 结果["冲突"]
         key重复段落 = self.format_key_duplicate(结果.get("key重复列表", []))
-        提示文本 = f"导出完成：成功 {成功数} 个，失败 {失败数} 个" + key重复段落
-        self.状态标签.setText(f"导出完成：成功 {成功数} 个，失败 {失败数} 个")
-        if 成功数 == 0 and 失败数 > 0:
-            QMessageBox.critical(self, "导出失败", self.format_error(结果["错误列表"]) + key重复段落)
-        elif 冲突:
-            说明 = self.format_conflict(冲突) + key重复段落
+        提示文本 = f"导出完成：成功 {成功数} 个，失败 {失败数} 个，跳过 {跳过数} 个"
+        self.状态标签.setText(提示文本)
+
+        跳过段落 = ""
+        if 结果.get("跳过列表"):
+            跳过段落 = "\n\n⚠ 以下文件因全部表 key 重复已跳过未导出：\n  - " + "\n  - ".join(
+                f"{文件名}\n    {详情}" for 文件名, 详情 in 结果["跳过列表"]
+            )
+        if 冲突:
+            说明 = self.format_conflict(冲突) + key重复段落 + 跳过段落
             QMessageBox.warning(self, "警告：存在重复生成的文件", 说明)
             self.状态标签.setText(提示文本 + "（存在重复覆盖警告）")
         elif 失败数 > 0:
-            QMessageBox.warning(self, "部分文件导出失败", self.format_error(结果["错误列表"]) + key重复段落)
+            QMessageBox.warning(self, "部分文件导出失败", self.format_error(结果["错误列表"]) + key重复段落 + 跳过段落)
+        elif 跳过数 > 0:
+            QMessageBox.information(self, "完成", 提示文本 + 跳过段落)
         else:
             QMessageBox.information(self, "完成", 提示文本)
 
@@ -526,11 +544,15 @@ class 导表窗口(QMainWindow):
 # 无窗口自检模式：打印进度与结果，供自动化验证，来源与导出目录写死为固定路径。
 def 命令行导出() -> int:
     结果 = 导出全部(固定来源路径, 固定导出路径, lambda 索引, 总数, 文件名: print(f"[{索引}/{总数}] {文件名}"))
-    print(f"完成：成功 {结果['成功']} 个，失败 {结果['失败']} 个")
+    print(f"完成：成功 {结果['成功']} 个，失败 {结果['失败']} 个，跳过 {结果.get('跳过', 0)} 个")
     if 结果["key重复列表"]:
         print("⚠ 以下表因 key 重复已跳过未导出：")
         for 提示 in 结果["key重复列表"]:
             print(f"  - {提示}")
+    if 结果.get("跳过列表"):
+        print("⚠ 以下文件因全部表 key 重复已跳过未导出：")
+        for 文件名, 详情 in 结果["跳过列表"]:
+            print(f"  - {文件名}\n    {详情}")
     if 结果["冲突"]:
         print("警告：以下 json 文件由多个 excel 生成，后导出的会覆盖先前的：")
         for 文件名, 来源 in 结果["冲突"].items():
