@@ -30,6 +30,7 @@ class 导出器:
 
     配置表标题: tuple[str, ...] = ("name", "value", "type", "sign", "description")
     最大空行数: int = 3
+    启用合并表: bool = False  # 暂时屏蔽 << 合并表功能，保留代码后续按需启用
 
     def __init__(self, 上下文):
         self.上下文 = 上下文
@@ -158,7 +159,7 @@ class 导出器:
             导出标记 = 导表工具集.获取导出标记(工作表名称)
             if 导出标记:
                 工作表 = 数据.sheets[工作表名称]
-                是否合并 = 工作表名称.endswith("<<")
+                是否合并 = self.启用合并表 and 工作表名称.endswith("<<")
                 配置标题信息 = self.获取配置表标题信息(工作表)
                 if not 配置标题信息:
                     根名称 = self.获取根名称(导出标记, not 是否合并)
@@ -221,18 +222,24 @@ class 导出器:
         else:
             return None
 
-    # 导出条目数据表：解析前两行标题信息，逐行构建条目对象并收集模式。
-    def 导出条目工作表(self, 工作表) -> tuple[collections.OrderedDict, list]:
+    # 导出条目数据表：强校验首列为 ID/key，首列作为分块键，字段从第 2 列起逐行构建条目对象并收集模式。
+    def 导出条目工作表(self, 工作表) -> tuple[collections.OrderedDict, collections.OrderedDict]:
         行迭代 = iter(工作表.rows)
         名称行 = next(行迭代)
         类型行 = next(行迭代)
+
+        # 表头格式强校验：第 1 行第 1 列必须为 ID，第 2 行第 1 列必须为 key。
+        首列名称 = 导表工具集.获取单元格值(名称行[0]).strip()
+        首列类型 = 导表工具集.获取单元格值(类型行[0]).strip()
+        if 首列名称 != "ID" or 首列类型 != "key":
+            raise ValueError(f"{os.path.basename(self.路径)}的{self.工作表名称}的key格式不对")
 
         列数 = len(类型行)
         标题信息列表 = []
         模式对象 = collections.OrderedDict()
 
         try:
-            for 列索引 in range(列数):
+            for 列索引 in range(1, 列数):  # 跳过第 0 列（ID/key），该列仅作为分块键
                 类型 = 导表工具集.获取单元格值(类型行[列索引]).strip()
                 名称 = 导表工具集.获取单元格值(名称行[列索引]).strip()
                 标题信息列表.append((类型, 名称, True))
@@ -245,7 +252,7 @@ class 导出器:
             异常.args += (f"{工作表.name} 存在标题错误，{列索引 + 1} 列 {类型} {名称} 于 {self.路径} 出错", "")
             raise 异常
 
-        列表 = []
+        对象 = collections.OrderedDict()
         存在导出 = next((信息 for 信息 in 标题信息列表 if 信息[0] and 信息[1] and 信息[2]), False)
         if 存在导出:
             try:
@@ -274,28 +281,37 @@ class 导出器:
                             else:
                                 跳过标记索引 = len(签名标记) + 2
 
-                    for self.列索引 in range(列数):
-                        签名匹配 = 标题信息列表[self.列索引][2]
+                    分块键 = 首列文本
+                    if 跳过标记索引:
+                        分块键 = 分块键.lstrip()[跳过标记索引:]
+
+                    # 数字型 ID（如 1.0）按参考 JSON 规范输出为整数形式字符串（"1"）。
+                    if 分块键.endswith(".0"):
+                        try:
+                            分块键 = str(int(float(分块键)))
+                        except ValueError:
+                            pass
+
+                    for self.列索引 in range(1, 列数):
+                        签名匹配 = 标题信息列表[self.列索引 - 1][2]
                         if 签名匹配:
-                            类型 = 标题信息列表[self.列索引][0]
-                            名称 = 标题信息列表[self.列索引][1]
+                            类型 = 标题信息列表[self.列索引 - 1][0]
+                            名称 = 标题信息列表[self.列索引 - 1][1]
                             值 = 导表工具集.获取单元格值(行[self.列索引])
 
-                            if 跳过标记索引 and self.列索引 == 0:
-                                值 = 值.lstrip()[跳过标记索引:]
-
-                            if 类型 and 名称 and 值:
+                            # string 类型的空值按参考 JSON 保留为空字符串，其余类型空值跳过。
+                            if 类型 and 名称 and (值 or 类型 == "string"):
                                 self.构建表达式(条目, 类型, 名称, self.检查字符串转义(类型, 值))
                         空行计数 = 0
 
                     if 条目:
-                        列表.append(条目)
+                        对象[分块键] = 条目
 
             except Exception as 异常:
                 异常.args += (f"{工作表.name} 在 {self.行索引 + 1} 行 {self.列索引 + 1}（{名称}）处于 {self.路径} 出错", "")
                 raise 异常
 
-        return (模式对象, 列表)
+        return (模式对象, 对象)
 
     # 导出配置表：逐行解析名称、值、类型与签名，构建配置对象并收集模式。
     def 导出配置表(self, 工作表, 标题索引: tuple) -> tuple[collections.OrderedDict, collections.OrderedDict]:
