@@ -11,7 +11,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP_NAME="导表工具"
+APP_NAME="导表工具Ubuntu"
 VENV_DIR=".venv-pack"
 ENTRY_SCRIPT="导表工具_图形界面.py"
 
