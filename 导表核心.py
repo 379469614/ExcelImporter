@@ -17,6 +17,10 @@ import 导表工具集
 import 导表输出器
 
 
+class 键重复异常(Exception):
+    """A 列 key 重复时抛出，触发跳过当前表。"""
+
+
 class 约束:
     """保存标记与字段名的约束信息，供导出过程中的条件判断使用。"""
 
@@ -35,6 +39,7 @@ class 导出器:
     def __init__(self, 上下文):
         self.上下文 = 上下文
         self.记录列表: list[导表输出器.导出记录] = []
+        self.跳过提示列表: list[str] = []  # 收集因 A 列 key 重复被跳过的表提示
 
     # 将类型特定转义符还原为原始字符：字符串内的换行、逗号与对象分隔符。
     def 检查字符串转义(self, 类型: str, 值: str) -> str:
@@ -173,7 +178,12 @@ class 导出器:
                     导出文件 = 导表工具集.生成导出文件路径(根名称, self.上下文.格式, self.上下文.文件夹)
 
                     if 条目名称:
-                        导出对象 = self.导出条目工作表(工作表)
+                        try:
+                            导出对象 = self.导出条目工作表(工作表)
+                        except 键重复异常 as 异常:
+                            print(异常)  # A 列 key 重复，跳过该表不导出
+                            self.跳过提示列表.append(str(异常))
+                            continue
                     else:
                         导出对象 = self.导出配置表(工作表, 配置标题信息)
 
@@ -193,7 +203,12 @@ class 导出器:
                     self.记录列表.append(导表输出器.导出记录(self.路径, 工作表, 导出文件, 根名称, 条目名称, 导出对象, 导出标记))
                 else:
                     if 条目名称:
-                        导出对象 = self.导出条目工作表(工作表)
+                        try:
+                            导出对象 = self.导出条目工作表(工作表)
+                        except 键重复异常 as 异常:
+                            print(异常)  # A 列 key 重复，跳过该表不导出
+                            self.跳过提示列表.append(str(异常))
+                            continue
                         合并输出[0][条目名称] = [[导出对象[0]]]
                         对象 = 导出对象[1]
                         if 对象:
@@ -306,7 +321,12 @@ class 导出器:
                         空行计数 = 0
 
                     if 条目:
+                        if 分块键 in 对象:
+                            raise 键重复异常(f"{os.path.basename(self.路径)}的{self.工作表名称}的key重复了")
                         对象[分块键] = 条目
+
+            except 键重复异常:
+                raise  # A 列重复错误原样上抛，不追加行号信息
 
             except Exception as 异常:
                 异常.args += (f"{工作表.name} 在 {self.行索引 + 1} 行 {self.列索引 + 1}（{名称}）处于 {self.路径} 出错", "")
