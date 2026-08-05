@@ -233,6 +233,19 @@ class 导出器:
         标题信息列表 = []
         模式对象 = collections.OrderedDict()
 
+        # 表头类型提前校验：第 2 行类型不支持时定位到对应列，早于数据解析报错并跳过整表。
+        for 列索引 in range(1, 列数):
+            类型 = 导表工具集.获取单元格值(类型行[列索引]).strip()
+            名称 = 导表工具集.获取单元格值(名称行[列索引]).strip()
+            if 类型 and 名称 and 类型.lower() != "none":
+                try:
+                    self.获取类型(类型)
+                except Exception:
+                    raise ValueError(
+                        f"{os.path.basename(self.路径)}的{self.工作表名称}的"
+                        f"{导表工具集.获取列字母(列索引 + 1)}列的第2行类型不合法"
+                    )
+
         try:
             for 列索引 in range(1, 列数):  # 跳过第 0 列（ID/key），该列仅作为分块键
                 类型 = 导表工具集.获取单元格值(类型行[列索引]).strip()
