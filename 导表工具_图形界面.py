@@ -623,6 +623,17 @@ def 命令行导出() -> int:
 def 主函数() -> None:
     multiprocessing.freeze_support()  # PyInstaller 打包后 multiprocessing 需要
     if 常量_自检参数 in sys.argv:
+        # Windows 下 -w（无控制台）打包时：
+        # - 有的环境下 sys.stdout 为 None；
+        # - 有的环境下 sys.stdout 指向 gbk 编码的无效流，打印非 GBK 字符（如 ⚠）会崩溃。
+        # 统一改为 UTF-8 容错编码；无法 reconfigure 时退化为静默 StringIO。
+        # 自检结果仅以退出码传递，不依赖可见输出。
+        import io
+
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            sys.stdout = io.StringIO()
         sys.exit(命令行导出())
 
     # 高分屏适配
