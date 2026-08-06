@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """导表工具图形界面（PyQt6 版）
 
 选择来源目录与导出目录，批量将 xlsx 导出为 json。
