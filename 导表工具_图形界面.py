@@ -36,6 +36,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPlainTextEdit,
+    QFrame,
 )
 
 
@@ -248,6 +249,12 @@ QLabel#副标题 {
 QLabel#状态标签 {
     color: #a8b3c5;
 }
+QFrame#分隔线 {
+    background-color: #2e3440;
+    min-height: 1px;
+    max-height: 1px;
+    border: none;
+}
 QLineEdit {
     background-color: #1f232c;
     border: 1px solid #2e3440;
@@ -412,7 +419,13 @@ class 导表窗口(QMainWindow):
         self.状态标签.setObjectName("状态标签")
         主布局.addWidget(self.状态标签)
         self.状态标签.setWordWrap(True)
-        主布局.addStretch(1)
+
+        # 横向分隔线：状态文本与导出日志之间
+        分隔线 = QFrame()
+        分隔线.setObjectName("分隔线")
+        分隔线.setFrameShape(QFrame.Shape.HLine)
+        分隔线.setFrameShadow(QFrame.Shadow.Plain)
+        主布局.addWidget(分隔线)
 
         # 日志
         日志标题 = QLabel("导出日志")
@@ -420,8 +433,7 @@ class 导表窗口(QMainWindow):
         主布局.addWidget(日志标题)
         self.日志区 = QPlainTextEdit()
         self.日志区.setReadOnly(True)
-        self.日志区.setMaximumHeight(130)
-        主布局.addWidget(self.日志区)
+        主布局.addWidget(self.日志区, 1)  # 占满剩余空间
 
         # 开始按钮
         self.按钮开始 = QPushButton("开始导出")
