@@ -540,15 +540,23 @@ class 导表窗口(QMainWindow):
             )
         if 冲突:
             说明 = self.format_conflict(冲突) + key重复段落 + 部分段落 + 跳过段落
+            self.append_log("═══ 导出汇总 ═══\n" + 说明)
             QMessageBox.warning(self, "警告：存在重复生成的文件", 说明)
             self.状态标签.setText(提示文本 + "（存在重复覆盖警告）")
         elif 失败数 > 0:
-            QMessageBox.warning(self, "部分文件导出失败", self.format_error(结果["错误列表"]) + key重复段落 + 部分段落 + 跳过段落)
+            说明 = self.format_error(结果["错误列表"]) + key重复段落 + 部分段落 + 跳过段落
+            self.append_log("═══ 导出汇总 ═══\n" + 说明)
+            QMessageBox.warning(self, "部分文件导出失败", 说明)
         elif 部分数 > 0:
-            QMessageBox.warning(self, "部分表未导出", 提示文本 + 部分段落 + key重复段落 + 跳过段落)
+            说明 = 提示文本 + 部分段落 + key重复段落 + 跳过段落
+            self.append_log("═══ 导出汇总 ═══\n" + 说明)
+            QMessageBox.warning(self, "部分表未导出", 说明)
         elif 跳过数 > 0:
-            QMessageBox.information(self, "完成", 提示文本 + 跳过段落)
+            说明 = 提示文本 + 跳过段落
+            self.append_log("═══ 导出汇总 ═══\n" + 说明)
+            QMessageBox.information(self, "完成", 说明)
         else:
+            self.append_log("═══ 导出汇总 ═══\n" + 提示文本)
             QMessageBox.information(self, "完成", 提示文本)
 
     @staticmethod
