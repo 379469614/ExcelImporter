@@ -22,7 +22,7 @@ import 导表工具集
 from 导表核心 import 导出器
 from 导表入口 import 导出上下文
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
@@ -648,6 +648,10 @@ def 主函数() -> None:
     应用.setFont(字体)
     窗口 = 导表窗口()
     窗口.show()
+    # 打包后的可执行文件（Linux/Windows）启动后自动执行一次"开始导出"；
+    # 源码直接运行时保持手动点击，行为不变。
+    if 是打包程序:
+        QTimer.singleShot(0, 窗口.start_export)
     sys.exit(应用.exec())
 
 
