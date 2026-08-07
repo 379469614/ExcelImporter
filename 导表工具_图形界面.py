@@ -81,26 +81,10 @@ def 引导自带依赖() -> None:
 
 # ---------------------------------------------------------------- 核心逻辑
 
-# 预扫各 xlsx 的 sheet 导出标记，检测不同文件含同名标记导致生成同名 json 相互覆盖的问题。
-def 扫描根节点冲突(xlsx路径列表: list) -> dict:
-    标记到来源 = {}
-    上下文 = 导出上下文()
-    for 路径 in xlsx路径列表:
-        try:
-            工作簿 = sxl.Workbook(路径)
-        except Exception:
-            continue
-        for 名称 in 工作簿.sheets:
-            if isinstance(名称, str):
-                标记 = 导表工具集.获取导出标记(名称)
-                if 标记:
-                    表 = 工作簿.sheets[名称]
-                    导出实例 = 导出器(上下文)
-                    是配置表 = 导出实例.获取配置表标题信息(表) is not None
-                    # 数据表与配置表均直接以标记作为文件名
-                    文件名 = 标记
-                    标记到来源.setdefault(文件名 + ".json", []).append(路径)
-    return {文件名: 来源 for 文件名, 来源 in 标记到来源.items() if len(来源) > 1}
+# 预扫各 xlsx 的 sheet 导出标记，返回（冲突标记集合, 冲突提示列表）。
+# 冲突标记用于导出时跳过同名表，冲突提示按"XXX.xlsx和YYY.xlsx存在同名sheet：|表名"格式生成。
+def 扫描根节点冲突(xlsx路径列表: list) -> tuple:
+    return 导表工具集.查找同名标记冲突(xlsx路径列表)
 
 
 # 按导表入口默认参数构建单个文件的导出上下文。
@@ -127,7 +111,7 @@ def 导出全部(来源目录: str, 导出目录: str, 进度回调, 明细回�
         and not 文件名.startswith((".~", "~$"))  # 过滤 Office 临时锁定文件
     )
     xlsx路径列表 = [os.path.join(来源目录, 文件名) for 文件名 in xlsx列表]
-    冲突 = 扫描根节点冲突(xlsx路径列表)
+    冲突标记, 冲突提示列表 = 扫描根节点冲突(xlsx路径列表)
     成功数 = 0
     错误列表 = []
     跳过列表 = []
@@ -139,7 +123,7 @@ def 导出全部(来源目录: str, 导出目录: str, 进度回调, 明细回�
         进度回调(索引, 总数, 文件名)
         try:
             导出实例 = 导出器(构建导出上下文(xlsx路径, 导出目录))
-            导出实例.导出(xlsx路径)
+            导出实例.导出(xlsx路径, 冲突标记)
             key重复列表.extend(导出实例.跳过提示列表)
             # 以是否实际产出导出文件为成功判据：
             # 全部表因 key 重复被跳过（零输出）的文件单独计入跳过，不入成功也不入失败。
@@ -181,7 +165,7 @@ def 导出全部(来源目录: str, 导出目录: str, 进度回调, 明细回�
         "跳过列表": 跳过列表,
         "部分": len(部分列表),
         "部分列表": 部分列表,
-        "冲突": 冲突,
+        "冲突": 冲突提示列表,
         "key重复列表": key重复列表,
     }
 
@@ -455,12 +439,12 @@ class 导表窗口(QMainWindow):
             and not 文件名.startswith((".~", "~$"))  # 过滤 Office 临时锁定文件
         )
         路径列表 = [os.path.join(来源目录, 文件名) for 文件名 in xlsx列表]
-        冲突 = 扫描根节点冲突(路径列表)
-        if 冲突:
-            说明 = self.format_conflict(冲突)
-            self.状态标签.setText("⚠ 检测到同名标记冲突，请检查")
-            self.append_log("警告：以下 json 文件由多个 excel 生成，后导出的会覆盖先前的：\n" + 说明)
-            QMessageBox.warning(self, "警告：存在重复生成的文件", 说明)
+        _, 冲突提示列表 = 扫描根节点冲突(路径列表)
+        if 冲突提示列表:
+            说明 = self.format_conflict(冲突提示列表)
+            self.状态标签.setText("⚠ 检测到同名可导出表，已跳过不导出")
+            self.append_log("警告：存在同名可导出表，相关表已跳过不导出：\n" + 说明)
+            QMessageBox.warning(self, "警告：存在同名可导出表", 说明 + "\n\n其余表已照常导出。")
         else:
             self.状态标签.setText("就绪")
 
@@ -539,10 +523,10 @@ class 导表窗口(QMainWindow):
                 f"{文件名}\n    {详情}" for 文件名, 详情 in 结果["跳过列表"]
             )
         if 冲突:
-            说明 = self.format_conflict(冲突) + key重复段落 + 部分段落 + 跳过段落
+            说明 = "以下同名可导出表已跳过不导出：\n" + self.format_conflict(冲突) + key重复段落 + 部分段落 + 跳过段落
             self.append_log("═══ 导出汇总 ═══\n" + 说明)
-            QMessageBox.warning(self, "警告：存在重复生成的文件", 说明)
-            self.状态标签.setText(提示文本 + "（存在重复覆盖警告）")
+            QMessageBox.warning(self, "警告：存在同名可导出表", 说明 + "\n\n其余表已照常导出。")
+            self.状态标签.setText(提示文本 + "（存在同名可导出表，已跳过不导出）")
         elif 失败数 > 0:
             说明 = self.format_error(结果["错误列表"]) + key重复段落 + 部分段落 + 跳过段落
             self.append_log("═══ 导出汇总 ═══\n" + 说明)
@@ -576,13 +560,11 @@ class 导表窗口(QMainWindow):
         return "\n\n".join(f"{文件名}:\n{详情}" for 文件名, 详情 in 错误列表)
 
     @staticmethod
-    def format_conflict(冲突: dict) -> str:
-        行列表 = ["以下 json 文件由多个 excel 生成（表标记同名），后导出的会覆盖先前的："]
-        for 文件名, 来源 in 冲突.items():
-            行列表.append(f"\n{文件名}")
-            for 源文件 in 来源:
-                行列表.append(f"  ← {源文件}")
-        return "\n".join(行列表)
+    def format_conflict(冲突提示列表: list) -> str:
+        """同名可导出表冲突提示段落，未发生时返回空字符串"""
+        if not 冲突提示列表:
+            return ""
+        return "\n".join(f"- {提示}" for 提示 in 冲突提示列表)
 
     def closeEvent(self, 事件) -> None:
         """关闭窗口时确保后台线程结束"""
@@ -610,9 +592,10 @@ def 命令行导出() -> int:
         for 文件名, 详情 in 结果["跳过列表"]:
             print(f"  - {文件名}\n    {详情}")
     if 结果["冲突"]:
-        print("警告：以下 json 文件由多个 excel 生成，后导出的会覆盖先前的：")
-        for 文件名, 来源 in 结果["冲突"].items():
-            print(f"  {文件名} <- {来源}")
+        print("警告：存在同名可导出表，相关表已跳过不导出：")
+        for 提示 in 结果["冲突"]:
+            print(f"  - {提示}")
+        print("其余表已照常导出。")
     if 结果["错误列表"]:
         for 文件名, 详情 in 结果["错误列表"]:
             print(f"失败 {文件名}:\n{详情}")
