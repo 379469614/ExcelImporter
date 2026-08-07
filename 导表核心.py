@@ -155,7 +155,8 @@ class 导出器:
 
     # 导出单个工作簿：遍历字符串键名工作表，识别标记并收集导出记录。
     # sheet 级容错：单张表存在类型/数据不合法或 key 重复时仅跳过该表，其余表照常导出。
-    def 导出(self, 路径: str) -> list[dict]:
+    # 冲突标记集合内的表（不同 xlsx 存在同名可导出表）直接跳过不导出，其余表照常导出。
+    def 导出(self, 路径: str, 冲突标记: set = None) -> list[dict]:
         self.路径 = 路径
         数据 = sxl.Workbook(self.路径)
 
@@ -163,6 +164,8 @@ class 导出器:
             self.工作表名称 = 工作表名称
             导出标记 = 导表工具集.获取导出标记(工作表名称)
             if not 导出标记:
+                continue
+            if 冲突标记 and 导出标记 in 冲突标记:
                 continue
             try:
                 self.导出单个表(数据, 工作表名称, 导出标记)
