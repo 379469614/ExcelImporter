@@ -7,6 +7,7 @@ import os
 import re
 import string
 
+import sxl
 import 嵌套解析器
 
 
@@ -78,5 +79,34 @@ def 获取列字母(列号: int) -> str:
     字母 = ""
     while 列号 > 0:
         列号, 余数 = divmod(列号 - 1, 26)
-        字母 = chr(ord("A") + 余数) + 字母
+        字母 = chr(余数 + ord("A")) + 字母
     return 字母
+
+
+# 预扫各 xlsx 带 | 标记的 sheet，返回（冲突标记集合, 冲突提示列表）。
+# 仅跨文件同名标记视为冲突；无 | 标记的 sheet 完全不参与判断。
+def 查找同名标记冲突(xlsx路径列表: list) -> tuple:
+    标记到来源 = {}
+    顺序 = []
+    for 路径 in xlsx路径列表:
+        try:
+            工作簿 = sxl.Workbook(路径)
+        except Exception:
+            continue
+        文件名 = os.path.basename(路径)
+        for 名称 in 工作簿.sheets:
+            if isinstance(名称, str):
+                标记 = 获取导出标记(名称)
+                if 标记:
+                    if 标记 not in 标记到来源:
+                        标记到来源[标记] = set()
+                        顺序.append(标记)
+                    标记到来源[标记].add(文件名)
+
+    冲突标记 = {标记 for 标记 in 顺序 if len(标记到来源[标记]) > 1}
+    冲突提示列表 = [
+        f"{'和'.join(sorted(标记到来源[标记]))}存在同名sheet：|{标记}，无法导出，请修改sheet名字后重新导出"
+        for 标记 in 顺序
+        if 标记 in 冲突标记
+    ]
+    return 冲突标记, 冲突提示列表
