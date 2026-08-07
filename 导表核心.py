@@ -92,11 +92,13 @@ class 导出器:
                 self.构建表达式(对象, 字段类型, 字段名称, None, 是模式)
             对象 = 导表工具集.获取模式信息(对象, 值)
         else:
-            字段值列表 = 嵌套解析器.分割对象值(值, self.上下文.对象分隔符)
-            for 索引 in range(0, len(字段类型列表)):
-                if 索引 < len(字段值列表):
+            if 值 and not 值.isspace():
+                字段值列表 = 嵌套解析器.分割对象值(值, self.上下文.对象分隔符)
+                for 索引 in range(0, len(字段类型列表)):
                     字段类型, 字段名称 = 导表工具集.分割空白字段(字段类型列表[索引])
-                    self.构建表达式(对象, 字段类型, 字段名称, 字段值列表[索引], False, True)
+                    # 缺失字段按字段类型导出对应默认值
+                    字段值 = 字段值列表[索引] if 索引 < len(字段值列表) else ""
+                    self.构建表达式(对象, 字段类型, 字段名称, 字段值, False, True)
 
         导表工具集.填充值(父容器, 名称, 对象, 是模式)
 
@@ -106,10 +108,14 @@ class 导出器:
         if 是模式:
             值 = 导表工具集.获取模式信息(类型名, 值)
         else:
-            if 类型名 != "string" and 值.isspace():
-                return
-
-            if 类型名 == "int" or 类型名 == "long":
+            if 类型名 != "string" and (not 值 or 值.isspace()):
+                if 类型名 == "int" or 类型名 == "long":
+                    值 = 0
+                elif 类型名 == "double" or 类型名 == "float":
+                    值 = 0.0
+                else:
+                    值 = False
+            elif 类型名 == "int" or 类型名 == "long":
                 值 = int(float(值))
             elif 类型名 == "double" or 类型名 == "float":
                 值 = float(值)
@@ -310,8 +316,8 @@ class 导出器:
                             名称 = 标题信息列表[self.列索引 - 1][1]
                             值 = 导表工具集.获取单元格值(行[self.列索引])
 
-                            # string 类型的空值按参考 JSON 保留为空字符串，其余类型空值跳过。
-                            if 类型 and 名称 and (值 or 类型 == "string"):
+                            # 空值按字段类型导出对应默认值。
+                            if 类型 and 名称:
                                 self.构建表达式(条目, 类型, 名称, self.检查字符串转义(类型, 值))
                         空行计数 = 0
 
@@ -372,8 +378,8 @@ class 导出器:
                     if 名称[0] != "#":
                         if self.上下文.代码生成器:
                             self.构建表达式(模式对象, 类型, 名称, 描述, True)
-                        if 值:
-                            self.构建表达式(对象, 类型, 名称, self.检查字符串转义(类型, 值))
+                        # 空 value 按字段类型导出对应默认值。
+                        self.构建表达式(对象, 类型, 名称, self.检查字符串转义(类型, 值))
                     空行计数 = 0
 
         except Exception as 异常:
