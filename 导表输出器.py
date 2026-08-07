@@ -3,8 +3,8 @@
 提供导出记录的承载结构，以及 XML、Lua、YCL 三种格式的序列化输出能力，
 供导表核心引擎保存最终导出结果。
 """
-import codecs
 import json
+from io import StringIO
 import xml.dom.minidom as minidom
 import xml.etree.ElementTree as ElementTree
 
@@ -77,8 +77,10 @@ def 保存为XML(记录: 导出记录) -> None:
 
     xml字符串 = ElementTree.tostring(书.getroot(), "utf-8")
     文档 = minidom.parseString(xml字符串)
-    with codecs.open(记录.导出文件, "w", "utf-8") as 文件:
-        文档.writexml(文件, "", "  ", "\n", "utf-8")
+    缓冲 = StringIO()
+    文档.writexml(缓冲, "", "  ", "\n", "utf-8")
+    with open(记录.导出文件, "w", encoding="utf-8", newline="\n") as 文件:
+        文件.write(缓冲.getvalue().rstrip("\n"))
 
     print("保存 %s 从 %s 到 %s" % (记录.导出文件, 记录.工作表.name, 记录.路径))
 

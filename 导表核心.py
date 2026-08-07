@@ -4,7 +4,6 @@
 配置表、构建导出对象，并按上下文指定的格式保存输出文件。Apache License 2.0
 版权归原 proton 项目作者 YANG Huan 所有，本文件为其中文规范重写版本。
 """
-import codecs
 import collections
 import json
 import os
@@ -413,8 +412,8 @@ class 导出器:
 
         if self.上下文.格式 == "json":
             json字符串 = json.dumps(记录.对象, ensure_ascii=False, indent=2)
-            with codecs.open(记录.导出文件, "w", "utf-8") as 文件:
-                文件.write(json字符串)
+            with open(记录.导出文件, "w", encoding="utf-8", newline="\n") as 文件:
+                文件.write(json字符串.rstrip("\n"))
             print("保存 %s 从 %s 到 %s" % (记录.导出文件, 记录.工作表.name, 记录.路径))
 
         elif self.上下文.格式 == "xml":
@@ -424,17 +423,16 @@ class 导出器:
 
         elif self.上下文.格式 == "lua":
             lua字符串 = "".join(导表输出器.转为Lua(记录.对象))
-            with codecs.open(记录.导出文件, "w", "utf-8") as 文件:
-                文件.write("return ")
-                文件.write(lua字符串)
+            with open(记录.导出文件, "w", encoding="utf-8", newline="\n") as 文件:
+                文件.write(("return " + lua字符串).rstrip("\n"))
             print("保存 %s 从 %s 到 %s" % (记录.导出文件, 记录.工作表.name, 记录.路径))
 
         elif self.上下文.格式 == "ycl":
             生成器 = 导表输出器.转为YCL(记录.对象)
             next(生成器)
             ycl字符串 = "".join(生成器)
-            with codecs.open(记录.导出文件, "w", "utf-8") as 文件:
-                文件.write(ycl字符串)
+            with open(记录.导出文件, "w", encoding="utf-8", newline="\n") as 文件:
+                文件.write(ycl字符串.rstrip("\n"))
             print("保存 %s 从 %s 到 %s" % (记录.导出文件, 记录.工作表.name, 记录.路径))
 
     # 检查已收集记录中是否存在同名根名称，重复时抛错提示来源文件。

@@ -95,8 +95,8 @@ def 导出多个文件(上下文: 导出上下文) -> None:
             目录 = os.path.dirname(上下文.代码生成器)
             if 目录 and not os.path.isdir(目录):
                 os.makedirs(目录)
-            with open(上下文.代码生成器, "w", encoding="utf-8") as 文件:
-                文件.write(模式json字符串)
+            with open(上下文.代码生成器, "w", encoding="utf-8", newline="\n") as 文件:
+                文件.write(模式json字符串.rstrip("\n"))
 
         已导出文件列表: list = []
         for 模式 in 模式列表:
