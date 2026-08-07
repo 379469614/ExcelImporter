@@ -45,12 +45,13 @@ class 导出上下文:
         self.对象分隔符: str = ";"
         self.代码生成器: str | None = None
         self.多进程数量: int | None = None
+        self.冲突标记: set = set()  # 跨文件同名可导出表标记集合，命中则跳过该表不导出
 
 
 # 构建默认上下文并封装导出器单文件导出，异常时返回堆栈文本。
 def 导出单个文件(上下文: 导出上下文, 路径: str):
     try:
-        return 导出器(上下文).导出(路径)
+        return 导出器(上下文).导出(路径, 上下文.冲突标记)
     except Exception as 异常:
         return traceback.format_exc()
 
@@ -73,6 +74,12 @@ def 导出多个文件(上下文: 导出上下文) -> None:
 
     错误列表: list = []
     模式列表: list = []
+
+    # 预扫各文件带 | 标记的 sheet，发现跨文件同名标记时仅跳过同名表，其余表照常导出。
+    冲突标记, 冲突提示列表 = 导表工具集.查找同名标记冲突(路径列表)
+    if 冲突提示列表:
+        print("\n".join(冲突提示列表))
+    上下文.冲突标记 = 冲突标记
 
     def 追加结果(结果) -> None:
         if type(结果) is str:
