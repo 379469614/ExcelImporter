@@ -2,16 +2,14 @@
 """生成AI调用脚本
 
 读取工程内导出引擎的全部源码（含 sxl 依赖），压缩编码后生成一个单文件、
-自包含、可独立复制的 AI 调用脚本（默认输出到工程目录 dist/ 下的 导表工具_AI.py），
-并同步把本生成脚本复制一份到 dist/，与产物放在一起，便于整体分发。
+自包含、可独立复制的 AI 调用脚本（默认输出到工程目录 dist/ 下的 导表工具_AI.py）。
 
 用法：
-    python3 生成AI调用脚本.py                 # 生成 ./dist/导表工具_AI.py，并复制生成脚本到 dist/
-    python3 生成AI调用脚本.py /tmp/xx.py      # 生成到指定路径（不复制生成脚本）
+    python3 生成AI调用脚本.py                 # 生成 ./dist/导表工具_AI.py
+    python3 生成AI调用脚本.py /tmp/xx.py      # 生成到指定路径
 """
 import base64
 import os
-import shutil
 import sys
 import zlib
 
@@ -41,7 +39,7 @@ import zlib
 
 命令行参数与 导表入口.py 完全一致，并额外支持 --json：
     -p  输入 excel 文件，用 , ; | 分隔
-    -f  输出文件夹
+    -f  输出文件夹（缺省：上一级目录/BouncyPinball/数据配置）
     -e  导出格式：json / xml / lua / ycl
     -s  签名（控制列/表是否导出）
     -t  导出文件后缀
@@ -93,6 +91,8 @@ def 主函数() -> None:
     临时目录 = _引导依赖()
     try:
         import 导表入口
+        # 注入本脚本所在目录，使默认导出路径与图形界面保持一致（上一级/BouncyPinball/数据配置）。
+        导表入口.脚本所在目录 = os.path.dirname(os.path.abspath(__file__))
         导表入口.主函数()
     finally:
         # 仅主进程清理临时目录；SystemExit（含错误退出）也会执行到此处。
@@ -122,11 +122,6 @@ def 主函数() -> None:
     with open(输出路径, "w", encoding="utf-8", newline="\n") as 文件:
         文件.write(内容)
     print(f"已生成：{输出路径}（{os.path.getsize(输出路径)} 字节）")
-    if not 指定路径:
-        # 默认模式下同步复制本生成脚本到 dist/，与产物放在一起便于整体分发。
-        生成脚本副本 = os.path.join(输出目录, os.path.basename(__file__))
-        shutil.copyfile(os.path.abspath(__file__), 生成脚本副本)
-        print(f"已复制生成脚本：{生成脚本副本}")
 
 
 if __name__ == "__main__":
