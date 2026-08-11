@@ -31,6 +31,7 @@ class 导出上下文:
     -m      : use the count of multiprocesses to export, default is cpu count
     -c      : a file path, save the excel structure to json
               the external program uses this file to automatically generate the read code
+    --json  : print a machine-readable JSON result summary at the end
     -h      : print this help message and exit
 
     https://github.com/yanghuan/proton
@@ -46,6 +47,7 @@ class 导出上下文:
         self.代码生成器: str | None = None
         self.多进程数量: int | None = None
         self.冲突标记: set = set()  # 跨文件同名可导出表标记集合，命中则跳过该表不导出
+        self.输出JSON摘要: bool = False  # 为真时在 stdout 末尾输出单行 JSON 结果摘要，供 AI 等外部程序解析
 
 
 # 构建默认上下文并封装导出器单文件导出，异常时返回堆栈文本。
@@ -96,6 +98,7 @@ def 导出多个文件(上下文: 导出上下文) -> None:
             结果 = 导出单个文件(上下文, 路径)
             追加结果(结果)
 
+    已导出文件列表: list = []
     if 模式列表:
         if 上下文.代码生成器:
             模式json字符串 = json.dumps(模式列表, ensure_ascii=False, indent=2)
@@ -105,7 +108,6 @@ def 导出多个文件(上下文: 导出上下文) -> None:
             with open(上下文.代码生成器, "w", encoding="utf-8", newline="\n") as 文件:
                 文件.write(模式json字符串.rstrip("\n"))
 
-        已导出文件列表: list = []
         for 模式 in 模式列表:
             导出文件 = 模式["exportfile"]
             已有记录 = next((记录 for 记录 in 已导出文件列表 if 记录["exportfile"] == 导出文件), False)
@@ -114,6 +116,25 @@ def 导出多个文件(上下文: 导出上下文) -> None:
                 os.remove(导出文件)
             else:
                 已导出文件列表.append(模式)
+
+    # 结果摘要：--json 模式下以单行 JSON 打印到 stdout 末尾，供 AI 等外部程序解析。
+    摘要 = {
+        "success": not bool(错误列表),
+        "format": 上下文.格式,
+        "out_folder": 上下文.文件夹,
+        "inputs": 路径列表,
+        "exported": [记录["exportfile"] for 记录 in 已导出文件列表],
+        "errors": 错误列表,
+        "warnings": 冲突提示列表,
+    }
+    if 上下文.代码生成器:
+        摘要["schema_file"] = 上下文.代码生成器
+
+    if 上下文.输出JSON摘要:
+        print(json.dumps(摘要, ensure_ascii=False))
+        if 错误列表:
+            sys.exit(-1)
+        return
 
     if 错误列表:
         print("\n\n".join(错误列表))
@@ -125,7 +146,7 @@ def 导出多个文件(上下文: 导出上下文) -> None:
 # 解析命令行参数并填充上下文，随后执行批量导出。
 def 主函数() -> None:
     print("argv:", sys.argv)
-    选项列表, 参数列表 = getopt.getopt(sys.argv[1:], "p:f:e:s:t:r:m:c:h")
+    选项列表, 参数列表 = getopt.getopt(sys.argv[1:], "p:f:e:s:t:r:m:c:h", ["json"])
 
     上下文 = 导出上下文()
     上下文.路径 = None
@@ -154,6 +175,8 @@ def 主函数() -> None:
             上下文.多进程数量 = int(值) if 值 is not None else None
         elif 选项 == "-c":
             上下文.代码生成器 = 值
+        elif 选项 == "--json":
+            上下文.输出JSON摘要 = True
         elif 选项 == "-h":
             print(导出上下文.__doc__)
             sys.exit()
@@ -162,7 +185,17 @@ def 主函数() -> None:
         print(导出上下文.__doc__)
         sys.exit(2)
 
-    导出多个文件(上下文)
+    if 上下文.输出JSON摘要:
+        # --json 模式下任何异常也输出机器可读失败摘要，便于 AI 解析。
+        try:
+            导出多个文件(上下文)
+        except SystemExit:
+            raise
+        except Exception as 异常:
+            print(json.dumps({"success": False, "error": str(异常)}, ensure_ascii=False))
+            sys.exit(-1)
+    else:
+        导出多个文件(上下文)
 
 
 if __name__ == "__main__":
