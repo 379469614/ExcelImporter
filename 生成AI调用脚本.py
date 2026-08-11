@@ -2,18 +2,23 @@
 """生成AI调用脚本
 
 读取工程内导出引擎的全部源码（含 sxl 依赖），压缩编码后生成一个单文件、
-自包含、可独立复制的 AI 调用脚本（默认输出到工程目录下的 导表工具_AI.py）。
+自包含、可独立复制的 AI 调用脚本（默认输出到工程目录 dist/ 下的 导表工具_AI.py），
+并同步把本生成脚本复制一份到 dist/，与产物放在一起，便于整体分发。
 
 用法：
-    python3 生成AI调用脚本.py                 # 生成 ./导表工具_AI.py
-    python3 生成AI调用脚本.py /tmp/xx.py      # 生成到指定路径
+    python3 生成AI调用脚本.py                 # 生成 ./dist/导表工具_AI.py，并复制生成脚本到 dist/
+    python3 生成AI调用脚本.py /tmp/xx.py      # 生成到指定路径（不复制生成脚本）
 """
 import base64
 import os
+import shutil
 import sys
 import zlib
 
 工程目录 = os.path.dirname(os.path.abspath(__file__))
+
+# 默认输出目录：复用 PyInstaller 打包产物目录 dist/
+输出目录 = os.path.join(工程目录, "dist")
 
 # 需要内嵌进单文件脚本的源码文件（工程内相对路径）
 源码文件列表 = [
@@ -101,7 +106,8 @@ if __name__ == "__main__":
 
 
 def 主函数() -> None:
-    输出路径 = sys.argv[1] if len(sys.argv) > 1 else os.path.join(工程目录, "导表工具_AI.py")
+    指定路径 = sys.argv[1] if len(sys.argv) > 1 else ""
+    输出路径 = 指定路径 if 指定路径 else os.path.join(输出目录, "导表工具_AI.py")
     条目列表 = []
     for 相对路径 in 源码文件列表:
         完整路径 = os.path.join(工程目录, 相对路径)
@@ -112,9 +118,15 @@ def 主函数() -> None:
         条目列表.append(f"    {键!r}: {编码数据!r},")
     内容 = 模板.replace("__内嵌文件__", "\n".join(条目列表))
     输出路径 = os.path.abspath(输出路径)
+    os.makedirs(os.path.dirname(输出路径), exist_ok=True)
     with open(输出路径, "w", encoding="utf-8", newline="\n") as 文件:
         文件.write(内容)
     print(f"已生成：{输出路径}（{os.path.getsize(输出路径)} 字节）")
+    if not 指定路径:
+        # 默认模式下同步复制本生成脚本到 dist/，与产物放在一起便于整体分发。
+        生成脚本副本 = os.path.join(输出目录, os.path.basename(__file__))
+        shutil.copyfile(os.path.abspath(__file__), 生成脚本副本)
+        print(f"已复制生成脚本：{生成脚本副本}")
 
 
 if __name__ == "__main__":
