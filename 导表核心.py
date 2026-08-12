@@ -55,7 +55,7 @@ class 导出器:
             return "list"
         if 类型[0] == "{" and 类型[-1] == "}":
             return "obj"
-        if 类型 in ("int", "double", "string", "bool", "long", "float"):
+        if 类型 in ("int", "string", "bool", "long", "float"):
             return 类型
 
         匹配 = re.search(r"(int|string|long)[" + string.whitespace + r"]*\((\S+)\.(\S+)\)", 类型)
@@ -111,13 +111,13 @@ class 导出器:
             if 类型名 != "string" and (not 值 or 值.isspace()):
                 if 类型名 == "int" or 类型名 == "long":
                     值 = 0
-                elif 类型名 == "double" or 类型名 == "float":
+                elif 类型名 == "float":
                     值 = 0.0
                 else:
                     值 = False
             elif 类型名 == "int" or 类型名 == "long":
                 值 = int(float(值))
-            elif 类型名 == "double" or 类型名 == "float":
+            elif 类型名 == "float":
                 值 = float(值)
             elif 类型名 == "string":
                 if 值.endswith(".0"):
