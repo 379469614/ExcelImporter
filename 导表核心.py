@@ -285,6 +285,7 @@ class 导出器:
             raise 异常
 
         对象 = collections.OrderedDict()
+        key所在行号: dict[str, int] = {}  # 记录各分块键首次出现的 Excel 行号，供 key 重复提示定位 A 列单元格
         存在导出 = next((信息 for 信息 in 标题信息列表 if 信息[0] and 信息[1] and 信息[2]), False)
         if 存在导出:
             try:
@@ -338,8 +339,12 @@ class 导出器:
 
                     if 条目:
                         if 分块键 in 对象:
-                            raise 键重复异常(f"{os.path.basename(self.路径)}的{self.工作表名称}的key重复了")
+                            raise 键重复异常(
+                                f"{os.path.basename(self.路径)}的{self.工作表名称}的key列的"
+                                f"A{key所在行号[分块键]}和A{self.行索引 + 1}重复"
+                            )
                         对象[分块键] = 条目
+                        key所在行号[分块键] = self.行索引 + 1  # 记录首次出现的 Excel 行号
 
             except 键重复异常:
                 raise  # A 列重复错误原样上抛，不追加行号信息
