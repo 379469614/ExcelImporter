@@ -1,5 +1,6 @@
 """导出项目的数据配置表。"""
 import argparse as 参数解析_库
+import os as 操作系统_库
 import sys as 系统_库
 
 import 导表路径规划
@@ -10,7 +11,10 @@ def 主函数() -> int:
     参数解析器 = 参数解析_库.ArgumentParser(description="导出 4数据配置表格/ 中的数据配置")
     参数解析器.add_argument("--项目目录", help="项目目录；未指定时使用当前工作目录")
     参数 = 参数解析器.parse_args()
-    输入目录, 输出目录 = 导表路径规划.获取导表目录(参数.项目目录)
+    项目目录 = 参数.项目目录 or 操作系统_库.path.dirname(
+        操作系统_库.path.dirname(操作系统_库.path.abspath(__file__))
+    )
+    输入目录, 输出目录 = 导表路径规划.获取导表目录(项目目录)
     配置表列表 = 导表路径规划.收集配置表(输入目录)
     if not 配置表列表:
         raise ValueError(f"数据配置目录没有可导出的 xlsx 文件：{输入目录}")

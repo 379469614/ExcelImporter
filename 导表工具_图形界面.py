@@ -57,11 +57,15 @@ else:
 # 图形界面仅导出数据配置；项目目录未传入时使用启动程序时的当前工作目录。
 参数解析器 = 参数解析_库.ArgumentParser(add_help=False)
 参数解析器.add_argument("--项目目录")
+参数解析器.add_argument("--文案", action="store_true")
 界面参数, 剩余参数 = 参数解析器.parse_known_args()
 sys.argv = [sys.argv[0], *剩余参数]
 固定路径错误 = ""
 try:
-    固定来源路径, 固定导出路径 = 导表路径规划.获取导表目录(界面参数.项目目录)
+    项目目录 = 界面参数.项目目录 or os.path.dirname(程序目录)
+    固定来源路径, 固定导出路径 = 导表路径规划.获取导表目录(
+        项目目录, 是文案=界面参数.文案
+    )
 except ValueError as 异常:
     固定来源路径 = ""
     固定导出路径 = ""
@@ -362,7 +366,8 @@ class 导表窗口(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("导表工具 - Excel 转 JSON")
+        工具名称 = "文案配置导表工具" if 界面参数.文案 else "数据配置导表工具"
+        self.setWindowTitle(f"{工具名称} - Excel 转 JSON")
         self.resize(720, 640)
         self.setMinimumSize(640, 560)
         self._线程 = None
@@ -377,7 +382,7 @@ class 导表窗口(QMainWindow):
         主布局.setSpacing(10)
 
         # 标题区
-        标题 = QLabel("导表工具")
+        标题 = QLabel("文案配置导表工具" if 界面参数.文案 else "数据配置导表工具")
         标题.setObjectName("标题")
         副标题 = QLabel("将目录下所有 Excel 表导出为 JSON 配置文件")
         副标题.setObjectName("副标题")
