@@ -20,6 +20,29 @@ def 获取项目目录(项目目录参数: str | None = None) -> str:
     return 项目目录
 
 
+def 获取工具所在项目目录(工具路径: str) -> str:
+    """从便携导表工具所在位置向上定位项目目录。"""
+    当前目录 = 操作系统_库.path.dirname(操作系统_库.path.abspath(工具路径))
+    while True:
+        数据表目录 = 操作系统_库.path.join(当前目录, 常量_数据表目录名)
+        if 操作系统_库.path.isdir(数据表目录):
+            try:
+                获取工程目录(当前目录)
+                return 当前目录
+            except ValueError:
+                pass
+
+        上级目录 = 操作系统_库.path.dirname(当前目录)
+        if 上级目录 == 当前目录:
+            break
+        当前目录 = 上级目录
+
+    raise ValueError(
+        "无法从导表工具所在位置定位项目目录；"
+        f"请传入 --项目目录，工具路径：{操作系统_库.path.abspath(工具路径)}"
+    )
+
+
 def 获取工程目录(项目目录: str) -> str:
     """在项目目录或其直属子目录中定位唯一的 Godot 工程目录。"""
     候选目录 = []
