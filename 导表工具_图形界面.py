@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """导表工具图形界面（PyQt6 版）
 
-选择来源目录与导出目录，批量将 xlsx 导出为 json。
+根据项目目录定位来源目录与导出目录，批量将 xlsx 导出为 json。
 - 深色现代主题（QSS 样式）
 - 导出前预扫描同名表标记冲突（不同 xlsx 生成同名 json 相互覆盖）
 - 后台线程导出，界面不卡顿
@@ -12,6 +12,7 @@
 （clicked.connect(self.中文方法) 会崩溃），信号槽方法与线程方法统一使用英文命名，
 其余变量、属性、核心逻辑一律中文。
 """
+import argparse as 参数解析_库
 import multiprocessing
 import os
 import sys
@@ -19,6 +20,7 @@ import traceback
 
 import sxl
 import 导表工具集
+import 导表路径规划
 from 导表核心 import 导出器
 from 导表入口 import 导出上下文
 
@@ -49,13 +51,21 @@ if 是打包程序:
 else:
     程序目录 = os.path.dirname(os.path.abspath(__file__))
 
-# 路径基准：当前 py 文件或可执行文件的上一级目录
+# 路径基准：当前 py 文件或可执行文件的上一级目录。
 路径基准目录 = os.path.dirname(程序目录)
 
-# 固定配置路径：来源目录与导出目录以路径基准目录（上一级目录）为基础拼接，
-# 后续无论是直接执行 py 脚本亦或是打包成可执行文件，均使用该写定的相对路径。
-固定来源路径 = os.path.normpath(os.path.join(路径基准目录, "5配置文件"))
-固定导出路径 = os.path.normpath(os.path.join(路径基准目录, "BouncyPinball", "数据配置"))
+# 图形界面仅导出数据配置；项目目录未传入时使用启动程序时的当前工作目录。
+参数解析器 = 参数解析_库.ArgumentParser(add_help=False)
+参数解析器.add_argument("--项目目录")
+界面参数, 剩余参数 = 参数解析器.parse_known_args()
+sys.argv = [sys.argv[0], *剩余参数]
+固定路径错误 = ""
+try:
+    固定来源路径, 固定导出路径 = 导表路径规划.获取导表目录(界面参数.项目目录)
+except ValueError as 异常:
+    固定来源路径 = ""
+    固定导出路径 = ""
+    固定路径错误 = str(异常)
 
 
 # 将界面填写的路径解析为绝对路径：绝对路径原样返回，相对路径以脚本所在目录的上一级目录为基准拼接。
@@ -449,6 +459,9 @@ class 导表窗口(QMainWindow):
             self.状态标签.setText("就绪")
 
     def validate_input(self):
+        if 固定路径错误:
+            QMessageBox.critical(self, "错误", f"项目目录无效：{固定路径错误}")
+            return None
         来源目录 = 解析路径(self.来源输入.text())
         导出目录 = 解析路径(self.导出输入.text())
         if not 来源目录 or not os.path.isdir(来源目录):

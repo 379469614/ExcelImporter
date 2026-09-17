@@ -15,17 +15,6 @@ import 导表工具集
 from 导表核心 import 导出器
 
 
-# 脚本所在目录：直接运行本文件时取其所在目录；生成产物 导表工具_AI.py 会在调用主函数前
-# 注入其自身所在目录，使默认导出路径与图形界面保持同一套约定。
-脚本所在目录 = os.path.dirname(os.path.abspath(__file__))
-
-
-# 与图形界面保持一致的默认导出目录：工具所在目录的上一级 / BouncyPinball / 数据配置。
-def 获取默认导出目录() -> str:
-    路径基准目录 = os.path.dirname(脚本所在目录)
-    return os.path.normpath(os.path.join(路径基准目录, "BouncyPinball", "数据配置"))
-
-
 class 导出上下文:
     """保存命令行与调用方传入的导出参数，供导出器解析与输出使用。
 
@@ -33,7 +22,7 @@ class 导出上下文:
     Arguments
     -p      : input excel files, use , or ; or space to separate
               缺省时自动收集当前目录下全部 xlsx 文件作为输入
-    -f      : out folder, 缺省时输出到 上一级目录/BouncyPinball/数据配置
+    -f      : out folder，建议使用导出数据配置.py 或导出文案配置.py 固定目标目录
     -e      : format, json or xml or lua or ycl
 
     Options
@@ -51,7 +40,7 @@ class 导出上下文:
 
     def __init__(self):
         self.路径: str | None = None
-        self.文件夹: str = 获取默认导出目录()
+        self.文件夹: str | None = None
         self.格式: str = "json"
         self.签名: str | None = None
         self.扩展名: str | None = None
@@ -212,9 +201,8 @@ def 主函数() -> None:
             sys.exit(2)
 
     if not 上下文.文件夹:
-        # -f 缺省时按图形界面约定输出到 上一级目录/BouncyPinball/数据配置。
-        上下文.文件夹 = 获取默认导出目录()
-        print("未指定 -f，默认输出到：", 上下文.文件夹)
+        print("未指定 -f，请使用导出数据配置.py 或导出文案配置.py，或显式传入输出目录")
+        sys.exit(2)
 
     if 上下文.输出JSON摘要:
         # --json 模式下任何异常也输出机器可读失败摘要，便于 AI 解析。
