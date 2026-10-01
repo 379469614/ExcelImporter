@@ -58,9 +58,16 @@ def 切分(文本, 分隔符, 跳空=False):
     return [项 for 项 in 结果 if 项] if 跳空 else 结果
 
 
-def 去括号(值, 左, 右):
-    值 = 值.strip()
-    return 值[1:-1] if 值.startswith(左) and 值.endswith(右) else 值
+def 去括号(值, 左, 右, 提醒=None):
+    清理值 = 值.strip()
+    if 清理值.startswith(左) and 清理值.endswith(右):
+        return 清理值[1:-1]
+    # 保持导表工具的解析语义，但在 strip 丢弃内容之前报告换行变化。
+    前缀 = 值[:len(值) - len(值.lstrip())]
+    后缀 = 值[len(值.rstrip()):]
+    if 提醒 is not None and '\n' in 前缀 + 后缀:
+        提醒('数组/对象值首尾的换行会在导表解析前被删除')
+    return 清理值
 
 
 def 解析类型(类型):
@@ -94,7 +101,7 @@ def 检查值(类型, 值, 提醒, 内部=False):
     if 种类 == '数组':
         if not 值:
             return
-        原文 = 去括号(值, '[', ']')
+        原文 = 去括号(值, '[', ']', 提醒)
         项 = 切分(原文, ',')
         if any(子项 == '' for 子项 in 项):
             提醒('数组中的空项会被跳过，不会生成占位默认值')
@@ -105,7 +112,7 @@ def 检查值(类型, 值, 提醒, 内部=False):
     if 种类 == '对象':
         if not 值 or 值.isspace():
             return
-        项 = 切分(去括号(值, '{', '}'), ';')
+        项 = 切分(去括号(值, '{', '}', 提醒), ';')
         if any(子项 == '' for 子项 in 项):
             提醒('对象中的空项会被跳过，可能导致字段位置移动')
         项 = [子项 for 子项 in 项 if 子项]
@@ -153,15 +160,12 @@ def 读取表格(文件):
         if 'xl/sharedStrings.xml' in 包.namelist():
             for 项 in ET.fromstring(包.read('xl/sharedStrings.xml')).findall(NS + 'si'):
                 共享.append(''.join(t.text or '' for t in 项.iter(NS + 't')))
-        日期样式, 换行样式 = set(), set()
+        日期样式 = set()
         if 'xl/styles.xml' in 包.namelist():
             样式 = ET.fromstring(包.read('xl/styles.xml'))
             自定 = {int(x.get('numFmtId')): x.get('formatCode', '')
                     for x in 样式.findall('./' + NS + 'numFmts/' + NS + 'numFmt')}
             for i, x in enumerate(样式.findall('./' + NS + 'cellXfs/' + NS + 'xf')):
-                对齐 = x.find(NS + 'alignment')
-                if 对齐 is not None and 对齐.get('wrapText') in ('1', 'true'):
-                    换行样式.add(i)
                 编号 = int(x.get('numFmtId', '0'))
                 格式 = re.sub(r'"[^"]*"|\\.|\[[^\]]*\]', '', 自定.get(编号, ''))
                 if 编号 in set(range(14, 23)) | set(range(27, 37)) | set(range(45, 48)) | set(range(50, 59)) or re.search('[ymdhs]', 格式, re.I):
@@ -195,9 +199,8 @@ def 读取表格(文件):
                 for 字 in 匹配[1]:
                     列 = 列 * 26 + ord(字) - 64
                 单元格[(int(匹配[2]), 列)] = (值, 类型)
-                if '\n' in 值 and int(c.get('s', '0')) not in 换行样式:
-                    报告('提醒', 文件, 表.get('name', ''), 地址, '文本包含实际换行但未开启自动换行')
-            yield 表.get('name', ''), 单元格, 根.find(NS + 'mergeCells') is not None
+            合并范围 = [项.get('ref', '') for 项 in 根.findall('./' + NS + 'mergeCells/' + NS + 'mergeCell')]
+            yield 表.get('name', ''), 单元格, 合并范围
 
 
 def 检查工作表(文件, 表, 格子, 合并):
@@ -210,8 +213,8 @@ def 检查工作表(文件, 表, 格子, 合并):
     def 提醒(r, c, 文):
         报告('提醒', 文件, 表, f'{列名(c)}{r}', 文)
 
-    if 合并:
-        提醒(1, 1, '存在合并单元格，非左上角单元格可能被读取为空')
+    for 范围 in 合并:
+        报告('提醒', 文件, 表, 范围, '存在合并单元格，非左上角单元格可能被读取为空')
     最大行 = max((r for r, c in 格子), default=0)
     最大列 = max((c for r, c in 格子 if r <= 2), default=0)
     表头 = [值(1, c) for c in range(1, 最大列 + 1)]
@@ -222,8 +225,9 @@ def 检查工作表(文件, 表, 格子, 合并):
     列类型, 键位置 = {}, {}
     if 配置表:
         for 名 in ('name', 'value', 'type', 'sign', 'description'):
-            if 表头.count(名) > 1:
-                错(1, 表头.index(名) + 1, '配置表标题重复：' + 名)
+            位置 = [c for c, 标题 in enumerate(表头, 1) if 标题 == 名]
+            for c in 位置[1:]:
+                错(1, c, f'配置表标题与 {列名(位置[0])}1 重复：{名}')
         名列, 值列, 类型列 = [表头.index(名) + 1 for 名 in ('name', 'value', 'type')]
         if 'description' not in 表头:
             提醒(1, 1, '缺少 description，当前导表工具会将最后一列误读为描述')
@@ -232,7 +236,8 @@ def 检查工作表(文件, 表, 格子, 合并):
         起始 = 2
     else:
         if 值(1, 1) != 'ID' or 值(2, 1) != 'key':
-            错(1, 1, '数据表必须 A1=ID、A2=key；配置表必须含 name/value/type')
+            错误行 = 1 if 值(1, 1) != 'ID' else 2
+            错(错误行, 1, '数据表必须 A1=ID、A2=key；配置表必须含 name/value/type')
             return
         名称位置 = {}
         for c in range(2, 最大列 + 1):
@@ -260,20 +265,22 @@ def 检查工作表(文件, 表, 格子, 合并):
         起始 = 3
     空行数, 截断 = 0, False
     for r in range(起始, 最大行 + 1):
-        键 = 值(r, 名列 if 配置表 else 1).strip()
+        键列 = 名列 if 配置表 else 1
+        键 = 值(r, 键列).strip()
+        # 先检查存储类型，避免无缓存公式和 #DIV/0! 被当作空行或注释跳过。
+        键类型异常 = 格子.get((r, 键列), ('', 'n'))[1] in ('公式', '日期', 'e', 'b')
+        if 键类型异常:
+            错(r, 键列, 'ID 或配置名称不能使用公式、日期、错误值或布尔值')
         空行 = not (键 or 值(r, 值列) or 值(r, 类型列)) if 配置表 else not 键
         if 空行:
             空行数 += 1
             if 空行数 >= 3:
                 截断 = True
-            if not 配置表 and any(v for (行, c), (v, _) in 格子.items() if 行 == r and c > 1):
+            if not 配置表 and not 键类型异常 and any(v for (行, c), (v, _) in 格子.items() if 行 == r and c > 1):
                 提醒(r, 1, 'ID 为空，此行其他数据不会导出')
             continue
         if 键.startswith('#'):
             continue
-        键列 = 名列 if 配置表 else 1
-        if 格子.get((r, 键列), ('', 'n'))[1] in ('公式', '日期', 'e', 'b'):
-            错(r, 键列, 'ID 或配置名称不能使用公式、日期、错误值或布尔值')
         if 截断:
             错(r, 1, '前面已累计三行空行，导表工具不会读取这里的数据')
         if not 配置表 and 键.startswith('!'):
