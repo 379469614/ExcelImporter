@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 RELEASE_DIR="发布包"
 VENV_DIR=".venv-pack"
-SOURCE_FILES=("导表路径规划.py" "导表入口.py" "导表核心.py" "导表工具集.py" "导表输出器.py" "嵌套解析器.py" "导表工具_图形界面.py" "导出数据配置.py" "导出文案配置.py" "数据配置图形入口.py" "文案配置图形入口.py" "数据配置便携入口.py" "文案配置便携入口.py" "发布说明.md")
+SOURCE_FILES=("导表路径规划.py" "导表入口.py" "导表核心.py" "导表工具集.py" "导表输出器.py" "嵌套解析器.py" "导表工具_图形界面.py" "导出数据配置.py" "导出文案配置.py" "数据配置图形入口.py" "文案配置图形入口.py" "数据配置便携入口.py" "文案配置便携入口.py" "生成独立脚本.py" "发布说明.md")
 
 记录() { printf '[打包] %s\n' "$*"; }
 失败() { printf '[错误] %s\n' "$*" >&2; exit 1; }
@@ -22,17 +22,7 @@ SOURCE_FILES=("导表路径规划.py" "导表入口.py" "导表核心.py" "导�
 }
 
 打包便携脚本() {
-    local PACKAGE_NAME="$1"
-    local PORTABLE_ENTRY="$2"
-    local COMMAND_ENTRY="$3"
-    local PACKAGE_DIR="$RELEASE_DIR/$PACKAGE_NAME"
-    local TEMP_DIR
-    TEMP_DIR="$(mktemp -d)"
-    cp 导表路径规划.py 导表入口.py 导表核心.py 导表工具集.py 导表输出器.py 嵌套解析器.py "$COMMAND_ENTRY" "$TEMP_DIR/"
-    cp "$PORTABLE_ENTRY" "$TEMP_DIR/__main__.py"
-    cp -R sxl "$TEMP_DIR/sxl"
-    "$VENV_DIR/bin/python" -m zipapp "$TEMP_DIR" -o "$PACKAGE_DIR/导表工具.py" -p '/usr/bin/env python3'
-    rm -rf "$TEMP_DIR"
+    "$VENV_DIR/bin/python" 生成独立脚本.py
 }
 
 打包Linux() {
@@ -63,8 +53,7 @@ test -x "$VENV_DIR/bin/python" || 失败 "缺少 $VENV_DIR/bin/python"
 rm -rf "$RELEASE_DIR"
 准备源码包 "数据配置导表工具" "导出数据配置.py"
 准备源码包 "文案配置导表工具" "导出文案配置.py"
-打包便携脚本 "数据配置导表工具" "数据配置便携入口.py" "导出数据配置.py"
-打包便携脚本 "文案配置导表工具" "文案配置便携入口.py" "导出文案配置.py"
+打包便携脚本
 记录 "打包 Linux 二进制"
 打包Linux "数据配置导表工具" "数据配置图形入口.py"
 打包Linux "文案配置导表工具" "文案配置图形入口.py"
